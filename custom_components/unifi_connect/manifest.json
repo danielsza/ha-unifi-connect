@@ -1,0 +1,11 @@
+{
+  "domain": "unifi_connect",
+  "name": "Unifi Connect",
+  "version": "0.1.0",
+  "documentation": "https://github.com/iamslan/ha-unifi-connect",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": ["@iamslan"],
+  "config_flow": true,
+  "iot_class": "local_polling"
+}
