@@ -27,3 +27,8 @@ class UnifiConnectHub:
         if not await self.api.login():
             raise Exception("Unable to log in to UniFi Connect")
         await self.coordinator.async_config_entry_first_refresh()
+
+
+    async def async_shutdown(self):
+        """Shutdown the hub and close sessions."""
+        await self.api.close()

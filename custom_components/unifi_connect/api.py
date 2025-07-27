@@ -55,6 +55,10 @@ class UnifiConnectAPI:
         try:
             async with async_timeout.timeout(10):
                 async with self._session.get(url, headers=headers, cookies=self._cookie, ssl=False) as resp:
+                    if resp.status == 401:
+                        _LOGGER.warning("Session expired, trying to re-login.")
+                        if await self.login():
+                            return await self.get_devices()
                     if resp.status == 200:
                         data = await resp.json()
                         return data.get("data", data)

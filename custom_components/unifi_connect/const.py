@@ -1,7 +1,7 @@
 DOMAIN = "unifi_connect"
 
 DEFAULT_PORT = 443
-DEFAULT_REFRESH_INTERVAL = 300  # in seconds (5 minutes)
+DEFAULT_REFRESH_INTERVAL = 30
 
 CONF_HOST = "host"
 CONF_USERNAME = "username"
