@@ -16,10 +16,21 @@ async def async_setup_entry(hass, entry, async_add_entities):
     numbers = []
 
     for device in devices:
-        if device.get("type", {}).get("platform") == "UC-Display-SE-21":
-            if "brightness" in device.get("featureFlags", {}):
+        platform = device.get("type", {}).get("platform", "")
+        feature_flags = device.get("featureFlags", {})
+
+        # EV Station Lite number entities
+        if platform == "EVS-Lite":
+            if "maxOutput" in feature_flags:
+                numbers.append(EVStationMaxOutputNumber(hub, device))
+            if "brightness" in feature_flags:
+                numbers.append(EVStationBrightnessNumber(hub, device))
+
+        # Display SE 21 number entities
+        elif platform == "UC-Display-SE-21":
+            if "brightness" in feature_flags:
                 numbers.append(DisplayBrightnessSlider(hub, device))
-            if "volume" in device.get("featureFlags", {}):
+            if "volume" in feature_flags:
                 numbers.append(DisplayVolumeSlider(hub, device))
 
     async_add_entities(numbers)
@@ -110,6 +121,97 @@ class DisplayVolumeSlider(CoordinatorEntity, NumberEntity):
             self._device_id,
             self._action_id,
             "volume",
+            {"value": int(value)}
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+
+class EVStationMaxOutputNumber(CoordinatorEntity, NumberEntity):
+    """Max output control for EV Station."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub.coordinator)
+        self._hub = hub
+        self._device = device
+        self._device_id = device["id"]
+
+        self._attr_name = f"{device['name']} Max Output"
+        self._attr_unique_id = f"{device['id']}_max_output"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["id"])},
+            name=device.get("name"),
+            manufacturer="Ubiquiti",
+            model=device.get("type", {}).get("fullName", "Unknown"),
+        )
+
+        max_output_range = device.get("featureFlags", {}).get("maxOutput", {})
+        self._attr_native_min_value = max_output_range.get("min", 6)
+        self._attr_native_max_value = max_output_range.get("max", 40)
+        self._attr_native_step = 1
+        self._attr_mode = "slider"
+        self._attr_native_unit_of_measurement = "A"
+        self._attr_icon = "mdi:current-ac"
+
+        self._action_id = "e6bffa16-ffc2-497c-969a-c5243affd82d"
+
+    @property
+    def native_value(self):
+        for d in self._hub.coordinator.data:
+            if d["id"] == self._device_id:
+                return d.get("shadow", {}).get("maxOutput", 6)
+        return 6
+
+    async def async_set_native_value(self, value: float):
+        _LOGGER.debug("Setting max output to %s A on %s", value, self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_id,
+            "set_max_output_amp",
+            {"amperage": int(value)}
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+
+class EVStationBrightnessNumber(CoordinatorEntity, NumberEntity):
+    """Brightness control for EV Station display."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub.coordinator)
+        self._hub = hub
+        self._device = device
+        self._device_id = device["id"]
+
+        self._attr_name = f"{device['name']} Brightness"
+        self._attr_unique_id = f"{device['id']}_brightness"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["id"])},
+            name=device.get("name"),
+            manufacturer="Ubiquiti",
+            model=device.get("type", {}).get("fullName", "Unknown"),
+        )
+
+        brightness_range = device.get("featureFlags", {}).get("brightness", {})
+        self._attr_native_min_value = brightness_range.get("min", 0)
+        self._attr_native_max_value = brightness_range.get("max", 255)
+        self._attr_native_step = 1
+        self._attr_mode = "slider"
+        self._attr_native_unit_of_measurement = "level"
+
+        self._action_id = "11ef64e2-9a38-4294-b3a2-579f497fb491"
+
+    @property
+    def native_value(self):
+        for d in self._hub.coordinator.data:
+            if d["id"] == self._device_id:
+                return d.get("shadow", {}).get("brightness", 0)
+        return 0
+
+    async def async_set_native_value(self, value: float):
+        _LOGGER.debug("Setting brightness to %s on %s", value, self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_id,
+            "brightness",
             {"value": int(value)}
         )
         await self._hub.coordinator.async_request_refresh()

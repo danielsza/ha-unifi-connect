@@ -28,6 +28,17 @@ To use this integration:
   - Volume control
   - Mode switching (Web, App) with URL selection, App Selection
   - Other settings like reload, sleep, etc...
+- Support for **UniFi EV Station Lite**, including:
+  - Charging status monitoring
+  - Charging enable/disable control
+  - Max output amperage control (6-40A)
+  - Display brightness control
+  - Status light control
+  - Station mode selection (Plug & Charge, No Access, Access with UniFi Identity)
+  - Fallback security settings
+  - Display label and admin message
+  - Locating mode
+  - Device reboot
 
 ## Installation
 

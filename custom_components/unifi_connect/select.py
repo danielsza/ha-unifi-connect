@@ -16,9 +16,18 @@ async def async_setup_entry(hass, entry, async_add_entities):
     selects = []
 
     for device in devices:
-        if device.get("type", {}).get("platform") == "UC-Display-SE-21":
-            features = device.get("featureFlags", {})
+        platform = device.get("type", {}).get("platform", "")
+        features = device.get("featureFlags", {})
 
+        # EV Station Lite select entities
+        if platform == "EVS-Lite":
+            if "evStationMode" in features:
+                selects.append(EVStationModeSelect(hub, device))
+            if "fallbackSecurity" in features:
+                selects.append(EVStationFallbackSecuritySelect(hub, device))
+
+        # Display SE 21 select entities
+        elif platform == "UC-Display-SE-21":
             if "mode" in features:
                 selects.append(DisplayModeSelect(hub, device))
 
@@ -113,5 +122,85 @@ class AppSelect(CoordinatorEntity, SelectEntity):
             self._launch_action_id,
             "launch_app",
             args={"packageName": option}
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+
+class EVStationModeSelect(CoordinatorEntity, SelectEntity):
+    """EV Station mode selector."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub.coordinator)
+        self._hub = hub
+        self._device = device
+        self._device_id = device["id"]
+
+        self._attr_name = f"{device['name']} Station Mode"
+        self._attr_unique_id = f"{device['id']}_ev_station_mode"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["id"])},
+            name=device.get("name"),
+            manufacturer="Ubiquiti",
+            model=device.get("type", {}).get("fullName", "Unknown"),
+        )
+
+        self._action_id = "564a0346-079f-4938-8004-1d5d79eda79a"
+        self._attr_options = device.get("featureFlags", {}).get("evStationMode", {}).get("enum", [])
+        self._attr_icon = "mdi:shield-lock"
+
+    @property
+    def current_option(self):
+        for d in self._hub.coordinator.data:
+            if d["id"] == self._device_id:
+                return d.get("shadow", {}).get("evStationMode", "plugAndCharge")
+        return "plugAndCharge"
+
+    async def async_select_option(self, option: str):
+        _LOGGER.debug("Setting EV station mode to %s on %s", option, self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_id,
+            "switch_ev_station_mode",
+            {"mode": option}
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+
+class EVStationFallbackSecuritySelect(CoordinatorEntity, SelectEntity):
+    """EV Station fallback security selector."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub.coordinator)
+        self._hub = hub
+        self._device = device
+        self._device_id = device["id"]
+
+        self._attr_name = f"{device['name']} Fallback Security"
+        self._attr_unique_id = f"{device['id']}_fallback_security"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["id"])},
+            name=device.get("name"),
+            manufacturer="Ubiquiti",
+            model=device.get("type", {}).get("fullName", "Unknown"),
+        )
+
+        self._action_id = "633270f6-d9f6-4253-b4df-9d06a7f47ad0"
+        self._attr_options = device.get("featureFlags", {}).get("fallbackSecurity", {}).get("enum", [])
+        self._attr_icon = "mdi:shield-alert"
+
+    @property
+    def current_option(self):
+        for d in self._hub.coordinator.data:
+            if d["id"] == self._device_id:
+                return d.get("shadow", {}).get("fallbackSecurity", "noAccess")
+        return "noAccess"
+
+    async def async_select_option(self, option: str):
+        _LOGGER.debug("Setting fallback security to %s on %s", option, self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_id,
+            "set_fallback_security",
+            {"mode": option}
         )
         await self._hub.coordinator.async_request_refresh()

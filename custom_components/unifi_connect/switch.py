@@ -22,17 +22,35 @@ async def async_setup_entry(hass, entry, async_add_entities):
         _LOGGER.debug("Evaluating device: %s", device.get("name", "Unknown"))
         _LOGGER.debug("Model: %s | ID: %s", device.get("type", {}).get("fullName"), device.get("id"))
 
-        switches.append(UnifiDisplaySE21Switch(hub, device))
-
+        platform = device.get("type", {}).get("platform", "")
         shadow = device.get("shadow", {})
-        if "autoRotate" in shadow:
-            switches.append(AutoRotateSwitch(hub, device))
-        if "autoReload" in shadow:
-            switches.append(AutoReloadSwitch(hub, device))
-        if "sleepMode" in shadow:
-            switches.append(DisplaySleepSwitch(hub, device))
-        if "autoSleep" in shadow:
-            switches.append(DisplayAutoSleepSwitch(hub, device))
+        relay_shadow = device.get("relayShadow", {})
+
+        # EV Station Lite switches
+        if platform == "EVS-Lite":
+            # Charging enabled switch (from relayShadow)
+            if "enabledCharging" in relay_shadow:
+                switches.append(EVStationChargingSwitch(hub, device))
+
+            # Status light switch
+            if "statusLightEnabled" in shadow:
+                switches.append(EVStationStatusLightSwitch(hub, device))
+
+            # Locating switch
+            switches.append(EVStationLocatingSwitch(hub, device))
+
+        # Display SE 21 switches
+        elif platform == "UC-Display-SE-21":
+            switches.append(UnifiDisplaySE21Switch(hub, device))
+
+            if "autoRotate" in shadow:
+                switches.append(AutoRotateSwitch(hub, device))
+            if "autoReload" in shadow:
+                switches.append(AutoReloadSwitch(hub, device))
+            if "sleepMode" in shadow:
+                switches.append(DisplaySleepSwitch(hub, device))
+            if "autoSleep" in shadow:
+                switches.append(DisplayAutoSleepSwitch(hub, device))
 
     async_add_entities(switches)
 
@@ -287,5 +305,149 @@ class DisplayAutoSleepSwitch(CoordinatorEntity, SwitchEntity):
             self._device_id,
             self._action_disable_id,
             "disable_memorize_playlist"
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+
+class EVStationChargingSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable/disable charging for EV Station."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub.coordinator)
+        self._hub = hub
+        self._device = device
+        self._device_id = device["id"]
+
+        self._attr_name = f"{device['name']} Charging"
+        self._attr_unique_id = f"{device['id']}_charging"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["id"])},
+            name=device.get("name"),
+            manufacturer="Ubiquiti",
+            model=device.get("type", {}).get("fullName", "Unknown"),
+        )
+        self._attr_icon = "mdi:ev-station"
+
+        self._action_enable_id = "d847c06d-8079-4d70-bb97-84bdc04f6921"
+        self._action_disable_id = "ae14879a-4874-4afc-8c70-02594a929e8d"
+
+    @property
+    def is_on(self):
+        for d in self._hub.coordinator.data:
+            if d["id"] == self._device_id:
+                return d.get("relayShadow", {}).get("enabledCharging", False)
+        return False
+
+    async def async_turn_on(self, **kwargs):
+        _LOGGER.debug("Enabling charging for %s", self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_enable_id,
+            "enable_charging"
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        _LOGGER.debug("Disabling charging for %s", self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_disable_id,
+            "disable_charging"
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+
+class EVStationStatusLightSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable/disable status light for EV Station."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub.coordinator)
+        self._hub = hub
+        self._device = device
+        self._device_id = device["id"]
+
+        self._attr_name = f"{device['name']} Status Light"
+        self._attr_unique_id = f"{device['id']}_status_light"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["id"])},
+            name=device.get("name"),
+            manufacturer="Ubiquiti",
+            model=device.get("type", {}).get("fullName", "Unknown"),
+        )
+        self._attr_icon = "mdi:led-on"
+
+        self._action_enable_id = "9ae9ece9-8d31-4177-9b56-f4bbc2f8e533"
+        self._action_disable_id = "29034cda-9500-4685-a97a-22c79f1e6b74"
+
+    @property
+    def is_on(self):
+        for d in self._hub.coordinator.data:
+            if d["id"] == self._device_id:
+                return d.get("shadow", {}).get("statusLightEnabled", False)
+        return False
+
+    async def async_turn_on(self, **kwargs):
+        _LOGGER.debug("Enabling status light for %s", self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_enable_id,
+            "enable_status_light"
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        _LOGGER.debug("Disabling status light for %s", self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_disable_id,
+            "disable_status_light"
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+
+class EVStationLocatingSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable/disable locating mode for EV Station."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub.coordinator)
+        self._hub = hub
+        self._device = device
+        self._device_id = device["id"]
+
+        self._attr_name = f"{device['name']} Locating"
+        self._attr_unique_id = f"{device['id']}_locating"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device["id"])},
+            name=device.get("name"),
+            manufacturer="Ubiquiti",
+            model=device.get("type", {}).get("fullName", "Unknown"),
+        )
+        self._attr_icon = "mdi:map-marker-radius"
+
+        self._action_enable_id = "b0ac572e-dc97-49f0-a8c8-2e7f69641a4d"
+        self._action_disable_id = "ad45e246-123a-4a13-9a4a-7c1ff87493b6"
+
+    @property
+    def is_on(self):
+        for d in self._hub.coordinator.data:
+            if d["id"] == self._device_id:
+                return d.get("shadow", {}).get("locating", False)
+        return False
+
+    async def async_turn_on(self, **kwargs):
+        _LOGGER.debug("Starting locating for %s", self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_enable_id,
+            "start_locating"
+        )
+        await self._hub.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        _LOGGER.debug("Stopping locating for %s", self._attr_name)
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_disable_id,
+            "stop_locating"
         )
         await self._hub.coordinator.async_request_refresh()

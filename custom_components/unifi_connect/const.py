@@ -12,4 +12,4 @@ CONF_CONTROLLER_TYPE = "controller_type"
 CONTROLLER_UDMP = "Unifi Dream Machine (inc Pro)"
 CONTROLLER_OTHER = "Other Unifi Controllers"
 
-PLATFORMS = ["switch", "select", "number", "text", "button"]
+PLATFORMS = ["sensor", "switch", "select", "number", "text", "button"]
