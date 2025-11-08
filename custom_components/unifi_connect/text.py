@@ -90,7 +90,7 @@ class EVStationDisplayLabelText(CoordinatorEntity, TextEntity):
             model=device.get("type", {}).get("fullName", "Unknown"),
         )
         self._attr_native_min = 0
-        self._attr_native_max = 128
+        self._attr_native_max = 15
         self._action_id = "ae1c886a-910c-4395-985b-6f93054c2e9f"
 
     @property
@@ -106,7 +106,7 @@ class EVStationDisplayLabelText(CoordinatorEntity, TextEntity):
             self._device_id,
             self._action_id,
             "set_display_label",
-            {"displayLabel": value}
+            {"enableDisplayLabel": True, "displayLabel": value}
         )
         await self._hub.coordinator.async_request_refresh()
 
