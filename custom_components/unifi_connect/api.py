@@ -88,12 +88,14 @@ class UnifiConnectAPI:
 
         try:
             async with async_timeout.timeout(10):
+                _LOGGER.debug("Sending action to %s: %s", url, payload)
                 async with self._session.patch(url, json=payload, headers=headers, cookies=self._cookie, ssl=False) as resp:
                     if resp.status == 200:
                         _LOGGER.debug("Action %s on %s successful", action_name, device_id)
                         return True
                     else:
-                        _LOGGER.warning("Failed to perform %s on %s: %s", action_name, device_id, resp.status)
+                        response_text = await resp.text()
+                        _LOGGER.warning("Failed to perform %s on %s: %s - Response: %s", action_name, device_id, resp.status, response_text)
         except Exception as e:
             _LOGGER.exception("Error performing %s on %s: %s", action_name, device_id, e)
         return False

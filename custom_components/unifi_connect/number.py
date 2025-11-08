@@ -167,7 +167,7 @@ class EVStationMaxOutputNumber(CoordinatorEntity, NumberEntity):
             self._device_id,
             self._action_id,
             "set_max_output_amp",
-            {"amperage": int(value)}
+            {"maxOutput": int(value)}
         )
         await self._hub.coordinator.async_request_refresh()
 

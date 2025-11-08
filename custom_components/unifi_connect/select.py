@@ -161,7 +161,7 @@ class EVStationModeSelect(CoordinatorEntity, SelectEntity):
             self._device_id,
             self._action_id,
             "switch_ev_station_mode",
-            {"mode": option}
+            {"evStationMode": option}
         )
         await self._hub.coordinator.async_request_refresh()
 
@@ -201,6 +201,6 @@ class EVStationFallbackSecuritySelect(CoordinatorEntity, SelectEntity):
             self._device_id,
             self._action_id,
             "set_fallback_security",
-            {"mode": option}
+            {"fallbackSecurity": option}
         )
         await self._hub.coordinator.async_request_refresh()

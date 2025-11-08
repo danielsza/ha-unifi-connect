@@ -106,7 +106,7 @@ class EVStationDisplayLabelText(CoordinatorEntity, TextEntity):
             self._device_id,
             self._action_id,
             "set_display_label",
-            {"label": value}
+            {"displayLabel": value}
         )
         await self._hub.coordinator.async_request_refresh()
 
@@ -145,6 +145,6 @@ class EVStationAdminMessageText(CoordinatorEntity, TextEntity):
             self._device_id,
             self._action_id,
             "set_admin_message",
-            {"message": value}
+            {"adminMessage": value}
         )
         await self._hub.coordinator.async_request_refresh()
