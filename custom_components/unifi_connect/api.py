@@ -31,6 +31,7 @@ class UnifiConnectAPI:
         self._port = port
         self._controller_type = controller_type
         self._session = session
+        self._cookies: aiohttp.CookieJar | None = None
         self._csrf: str | None = None
 
     async def login(self) -> bool:
@@ -48,6 +49,7 @@ class UnifiConnectAPI:
                     if resp.status != 200:
                         _LOGGER.error("Login failed with status %s", resp.status)
                         return False
+                    self._cookies = resp.cookies
                     self._csrf = resp.headers.get("x-csrf-token")
                     _LOGGER.debug("Login successful")
                     return True
@@ -109,7 +111,8 @@ class UnifiConnectAPI:
         try:
             async with asyncio.timeout(10):
                 async with self._session.request(
-                    method, url, json=json, headers=headers, ssl=False
+                    method, url, json=json, headers=headers,
+                    cookies=self._cookies, ssl=False,
                 ) as resp:
                     if resp.status == 401 and _retry:
                         _LOGGER.warning("Session expired, attempting re-login")
