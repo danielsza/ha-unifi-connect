@@ -3,10 +3,12 @@ from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from .api import UnifiConnectAPI
+
+from .api import UnifiConnectAPI, UnifiConnectAPIError
 from .const import DOMAIN, DEFAULT_REFRESH_INTERVAL
 
 _LOGGER = logging.getLogger(__name__)
+
 
 class UnifiConnectCoordinator(DataUpdateCoordinator):
     """Class to manage fetching UniFi Connect data."""
@@ -17,7 +19,6 @@ class UnifiConnectCoordinator(DataUpdateCoordinator):
         api: UnifiConnectAPI,
         update_interval: int = DEFAULT_REFRESH_INTERVAL,
     ):
-        """Initialize the coordinator."""
         self.api = api
         super().__init__(
             hass,
@@ -29,7 +30,6 @@ class UnifiConnectCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self):
         """Fetch data from UniFi Connect API."""
         try:
-            devices = await self.api.get_devices()
-            return devices
-        except Exception as err:
-            raise UpdateFailed(f"Error fetching UniFi Connect data: {err}")
+            return await self.api.get_devices()
+        except UnifiConnectAPIError as err:
+            raise UpdateFailed(f"Error fetching UniFi Connect data: {err}") from err

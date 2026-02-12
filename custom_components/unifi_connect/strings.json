@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to UniFi Controller",
+        "data": {
+          "host": "Host",
+          "username": "Username",
+          "password": "Password",
+          "port": "Port",
+          "controller_type": "Controller Type"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect or log in. Verify your host and credentials."
+    }
+  }
+}

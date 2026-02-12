@@ -1,115 +1,83 @@
 import logging
-from homeassistant.components.number import NumberEntity
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from homeassistant.components.number import NumberEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+from .const import DOMAIN, DEVICE_PLATFORM_SE21, ACTION_BRIGHTNESS, ACTION_VOLUME
+from .entity import UnifiConnectEntity
 from .hub import UnifiConnectHub
 
 _LOGGER = logging.getLogger(__name__)
 
-async def async_setup_entry(hass, entry, async_add_entities):
+NUMBER_ENTITIES = [
+    {
+        "feature_key": "brightness",
+        "shadow_key": "brightness",
+        "name_suffix": "Brightness",
+        "unique_suffix": "brightness",
+        "action_id": ACTION_BRIGHTNESS,
+        "action_name": "brightness",
+        "default_min": 0,
+        "default_max": 255,
+    },
+    {
+        "feature_key": "volume",
+        "shadow_key": "volume",
+        "name_suffix": "Volume",
+        "unique_suffix": "volume",
+        "action_id": ACTION_VOLUME,
+        "action_name": "volume",
+        "default_min": 0,
+        "default_max": 40,
+    },
+]
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up UniFi Connect number entities from config entry."""
     hub: UnifiConnectHub = hass.data[DOMAIN][entry.entry_id]
-    devices = hub.coordinator.data
+    entities: list[NumberEntity] = []
 
-    numbers = []
+    for device in hub.coordinator.data or []:
+        if device.get("type", {}).get("platform") != DEVICE_PLATFORM_SE21:
+            continue
 
-    for device in devices:
-        if device.get("type", {}).get("platform") == "UC-Display-SE-21":
-            if "brightness" in device.get("featureFlags", {}):
-                numbers.append(DisplayBrightnessSlider(hub, device))
-            if "volume" in device.get("featureFlags", {}):
-                numbers.append(DisplayVolumeSlider(hub, device))
+        features = device.get("featureFlags", {})
+        for config in NUMBER_ENTITIES:
+            if config["feature_key"] in features:
+                entities.append(DisplayNumberSlider(hub, device, config))
 
-    async_add_entities(numbers)
+    async_add_entities(entities)
 
 
-class DisplayBrightnessSlider(CoordinatorEntity, NumberEntity):
-    """Brightness control slider for SE 21."""
+class DisplayNumberSlider(UnifiConnectEntity, NumberEntity):
+    """Configurable number slider for SE 21 controls."""
 
-    def __init__(self, hub: UnifiConnectHub, device: dict):
-        super().__init__(hub.coordinator)
-        self._hub = hub
-        self._device = device
+    def __init__(self, hub: UnifiConnectHub, device: dict, config: dict):
+        super().__init__(hub, device, config["name_suffix"], config["unique_suffix"])
+        self._shadow_key = config["shadow_key"]
+        self._action_id = config["action_id"]
+        self._action_name = config["action_name"]
 
-        self._attr_name = f"{device['name']} Brightness"
-        self._attr_unique_id = f"{device['id']}_brightness"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device["id"])} ,
-            name=device.get("name"),
-            manufacturer="Ubiquiti",
-            model=device.get("type", {}).get("fullName", "Unknown"),
-        )
-
-        brightness_range = device.get("featureFlags", {}).get("brightness", {})
-        self._attr_native_min_value = brightness_range.get("min", 0)
-        self._attr_native_max_value = brightness_range.get("max", 255)
+        feature_range = device.get("featureFlags", {}).get(config["feature_key"], {})
+        self._attr_native_min_value = feature_range.get("min", config["default_min"])
+        self._attr_native_max_value = feature_range.get("max", config["default_max"])
         self._attr_native_step = 1
         self._attr_mode = "slider"
-        self._attr_unit_of_measurement = "level"
-
-        self._action_id = "521c3110-8f8e-400a-a06f-a529093c7a1c"
-        self._device_id = device["id"]
 
     @property
     def native_value(self):
-        for d in self._hub.coordinator.data:
-            if d["id"] == self._device_id:
-                return d.get("shadow", {}).get("brightness", 0)
-        return 0
+        return self._get_shadow().get(self._shadow_key, 0)
 
     async def async_set_native_value(self, value: float):
-        _LOGGER.debug("Setting brightness to %s on %s", value, self._attr_name)
         await self._hub.api.perform_action(
             self._device_id,
             self._action_id,
-            "brightness",
-            {"value": int(value)}
+            self._action_name,
+            {"value": int(value)},
         )
-        await self._hub.coordinator.async_request_refresh()
-
-
-class DisplayVolumeSlider(CoordinatorEntity, NumberEntity):
-    """Volume control slider for SE 21."""
-
-    def __init__(self, hub: UnifiConnectHub, device: dict):
-        super().__init__(hub.coordinator)
-        self._hub = hub
-        self._device = device
-
-        self._attr_name = f"{device['name']} Volume"
-        self._attr_unique_id = f"{device['id']}_volume"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device["id"])} ,
-            name=device.get("name"),
-            manufacturer="Ubiquiti",
-            model=device.get("type", {}).get("fullName", "Unknown"),
-        )
-
-        volume_range = device.get("featureFlags", {}).get("volume", {})
-        self._attr_native_min_value = volume_range.get("min", 0)
-        self._attr_native_max_value = volume_range.get("max", 40)
-        self._attr_native_step = 1
-        self._attr_mode = "slider"
-        self._attr_unit_of_measurement = "level"
-
-        self._action_id = "26f1b4d8-9fea-4a7c-94a5-daf70e84cd5b"
-        self._device_id = device["id"]
-
-    @property
-    def native_value(self):
-        for d in self._hub.coordinator.data:
-            if d["id"] == self._device_id:
-                return d.get("shadow", {}).get("volume", 0)
-        return 0
-
-    async def async_set_native_value(self, value: float):
-        _LOGGER.debug("Setting volume to %s on %s", value, self._attr_name)
-        await self._hub.api.perform_action(
-            self._device_id,
-            self._action_id,
-            "volume",
-            {"value": int(value)}
-        )
-        await self._hub.coordinator.async_request_refresh()
+        await self.coordinator.async_request_refresh()

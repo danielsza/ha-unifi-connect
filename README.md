@@ -1,74 +1,96 @@
-# Unifi Connect for Home Assistant
+# UniFi Connect for Home Assistant
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
-[![GitHub](https://img.shields.io/github/license/iamslan/ha-unifi-connect)](LICENSE)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/hacs/integration)
+[![GitHub License](https://img.shields.io/github/license/iamslan/ha-unifi-connect)](LICENSE)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.2.5%2B-blue)
 
-This is a custom [Home Assistant](https://www.home-assistant.io/) integration to support **Unifi Connect** devices (e.g., SE 21) using the [UniFi Connect Flow SDK API](https://ubntwiki.com/products/software/unifi-connect).
+A custom [Home Assistant](https://www.home-assistant.io/) integration for **UniFi Connect** display devices, using the local UniFi Connect API. Currently supports the **UniFi Connect Display SE 21**.
 
-## ⚠️ Notice
+## Prerequisites
 
-This integration **does not support UniFi accounts with 2FA or cloud-only login**.
+This integration communicates directly with your UniFi Console over the local network. It **does not support cloud-only UniFi accounts or accounts with 2FA enabled**.
 
-To use this integration:
+You must create a **local-only** UniFi OS account:
 
-1. You **must create a local UniFi OS account** on your console (e.g., Dream Machine Pro).
-2. Go to your UniFi Console:
-   - `Settings` → `Admin Settings` → `Accounts`
-   - Click **Add User**
-   - Select **Local Access Only**
-   - Assign the user **Full Management** privileges to UniFi Connect
-3. Use this local user account for login in the integration setup.
+1. Open your UniFi Console (e.g. Dream Machine Pro).
+2. Navigate to **Settings > Admins & Users > Add Admin**.
+3. Select **Local Access Only**.
+4. Grant **Full Management** access to UniFi Connect.
+5. Use these credentials when configuring the integration.
 
-## Features
+## Supported Entities
 
-- Local polling for UniFi Connect devices
-- Support for **Unifi Connect SE 21**, including:
-  - Power control
-  - Brightness control
-  - Volume control
-  - Mode switching (Web, App) with URL selection, App Selection
-  - Other settings like reload, sleep, etc...
+| Platform | Entity | Description |
+|----------|--------|-------------|
+| Switch | Display Power | Turn the display on/off |
+| Switch | Auto Rotate | Toggle automatic screen rotation |
+| Switch | Auto Reload | Toggle periodic web page reload |
+| Switch | Sleep Mode | Enable/disable sleep mode |
+| Switch | Auto Sleep | Enable/disable automatic sleep |
+| Number | Brightness | Adjust display brightness (slider) |
+| Number | Volume | Adjust display volume (slider) |
+| Select | Mode | Switch between Web and App mode |
+| Select | App Selector | Choose which app to launch (in App mode) |
+| Text | Web URL | Set the URL to display (in Web mode) |
+| Button | Reload Web Page | Refresh the currently displayed web page |
 
 ## Installation
 
 ### HACS (Recommended)
 
-1. In Home Assistant, go to **HACS > Integrations**.
-2. Click **⋮ > Custom repositories**.
-3. Add:
-   - **Repository:** `https://github.com/iamslan/ha-unifi-connect`
+1. Open **HACS > Integrations** in Home Assistant.
+2. Click the menu (**⋮**) and select **Custom repositories**.
+3. Add this repository:
+   - **URL:** `https://github.com/iamslan/ha-unifi-connect`
    - **Category:** Integration
-4. Click **Add**, then search for **Unifi Connect** and install.
+4. Search for **UniFi Connect** and install it.
+5. Restart Home Assistant.
 
 ### Manual
 
-1. Download this repository and extract it.
-2. Copy the `unifi_connect` folder to `custom_components/` in your Home Assistant configuration directory.
+1. Download or clone this repository.
+2. Copy the `custom_components/unifi_connect` folder into your Home Assistant `config/custom_components/` directory.
 3. Restart Home Assistant.
 
 ## Configuration
 
-1. Go to **Settings > Devices & Services > Integrations**.
-2. Click **Add Integration** and search for **Unifi Connect**.
-3. Enter your UniFi Console IP address (e.g., Dream Machine Pro), username, and password.
-4. Complete the configuration flow.
+1. Go to **Settings > Devices & Services > Add Integration**.
+2. Search for **UniFi Connect**.
+3. Enter your UniFi Console details:
+   - **Host** - IP address or hostname of your UniFi Console
+   - **Username / Password** - Local account credentials (see [Prerequisites](#prerequisites))
+   - **Controller Type** - Select your console type (Dream Machine or Other)
+   - **Port** - Defaults to `443`; only change if you use a non-standard port
+4. The integration validates your credentials before completing setup.
 
-> This integration uses local polling and does not require cloud access.
+## How It Works
+
+- **Local polling** - The integration polls your UniFi Console every 30 seconds for device state updates. No cloud dependency.
+- **Automatic re-authentication** - If the session expires, the integration re-authenticates transparently.
+- **Retry on startup** - If the console is unreachable during Home Assistant startup, the integration retries automatically.
 
 ## Troubleshooting
 
-- Make sure your UniFi OS version is up-to-date.
-- Ensure your Home Assistant instance can reach your UniFi Console on the local network.
-- Check logs in **Settings > System > Logs** for integration errors.
+- **Cannot connect during setup** - Verify your console IP is reachable from the Home Assistant host and that you are using a local-only account.
+- **Entities unavailable after restart** - Check that your UniFi Console is online. The integration will retry and recover automatically.
+- **Check logs** - Go to **Settings > System > Logs** and filter for `unifi_connect` to see detailed error messages.
+
+## Supported Devices
+
+| Device | Platform ID |
+|--------|-------------|
+| UniFi Connect Display SE 21 | `UC-Display-SE-21` |
+
+Additional UniFi Connect devices may work but are untested. If you have a different device and it works (or doesn't), please [open an issue](https://github.com/iamslan/ha-unifi-connect/issues).
 
 ## Contributing
 
-Pull requests are welcome! For major changes, please open an issue first to discuss what you would like to change.
+Pull requests are welcome. For major changes, please open an issue first to discuss your proposal.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
 
 ---
 
-**Maintainer**: [@iamslan](https://github.com/iamslan)
+**Maintainer:** [@iamslan](https://github.com/iamslan)

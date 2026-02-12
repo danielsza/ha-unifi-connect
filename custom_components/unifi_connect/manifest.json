@@ -1,7 +1,7 @@
 {
   "domain": "unifi_connect",
   "name": "Unifi Connect",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "documentation": "https://github.com/iamslan/ha-unifi-connect",
   "integration_type": "hub",
   "requirements": [],
