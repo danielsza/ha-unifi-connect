@@ -9,7 +9,6 @@ from .const import (
     DOMAIN,
     DEFAULT_REFRESH_INTERVAL,
     EV_DEVICE_PLATFORMS,
-    EV_ACTION_POWER_STATS_SINGLE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -20,10 +19,14 @@ def _is_ev_device(device: dict) -> bool:
     platform = device.get("type", {}).get("platform", "")
     if platform in EV_DEVICE_PLATFORMS:
         return True
+    # Also detect by shadow keys unique to EV devices
+    shadow = device.get("shadow", {})
+    if "chargingStatus" in shadow or "evStationMode" in shadow:
+        return True
     # Also detect by supported actions for unknown platform IDs
     actions = device.get("supportedActions", [])
     action_names = [a.get("name", "") if isinstance(a, dict) else "" for a in actions]
-    return EV_ACTION_POWER_STATS_SINGLE in action_names
+    return "power_stats_single" in action_names
 
 
 def _get_action_id(device: dict, action_name: str) -> str | None:
@@ -45,6 +48,7 @@ class UnifiConnectCoordinator(DataUpdateCoordinator):
     ):
         self.api = api
         self.charge_history: dict[str, list] = {}
+        self._first_run = True
         super().__init__(
             hass,
             _LOGGER,
@@ -57,8 +61,26 @@ class UnifiConnectCoordinator(DataUpdateCoordinator):
         try:
             devices = await self.api.get_devices()
 
-            # For EV devices, trigger power_stats_single to get fresh readings
-            # and fetch charge history
+            # Log device info on first run for debugging
+            if self._first_run:
+                _LOGGER.info(
+                    "DEVICES FOUND: %s",
+                    [
+                        {
+                            "name": d.get("name"),
+                            "platform": d.get("type", {}).get("platform"),
+                            "shadow_keys": list(d.get("shadow", {}).keys()),
+                            "actions": [
+                                a.get("name")
+                                for a in d.get("supportedActions", [])
+                                if isinstance(a, dict)
+                            ],
+                        }
+                        for d in devices or []
+                    ],
+                )
+
+            # For EV devices, fetch charge history and optionally trigger power stats
             for device in devices or []:
                 if not _is_ev_device(device):
                     continue
@@ -67,22 +89,17 @@ class UnifiConnectCoordinator(DataUpdateCoordinator):
                 if not device_id:
                     continue
 
-                # Log full shadow on first discovery to help map field names
-                shadow = device.get("shadow", {})
-                _LOGGER.debug(
-                    "EV device %s (%s) shadow: %s",
-                    device.get("name"),
-                    device_id,
-                    shadow,
-                )
-                _LOGGER.debug(
-                    "EV device %s supportedActions: %s",
-                    device.get("name"),
-                    device.get("supportedActions", []),
-                )
+                # Log shadow values on first run
+                if self._first_run:
+                    shadow = device.get("shadow", {})
+                    _LOGGER.info(
+                        "EV device %s shadow values: %s",
+                        device.get("name"),
+                        shadow,
+                    )
 
-                # Trigger power_stats_single to refresh real-time data
-                action_id = _get_action_id(device, EV_ACTION_POWER_STATS_SINGLE)
+                # Trigger power_stats_single if available
+                action_id = _get_action_id(device, "power_stats_single")
                 if action_id:
                     await self.api.request_power_stats(device_id, action_id)
 
@@ -90,18 +107,22 @@ class UnifiConnectCoordinator(DataUpdateCoordinator):
                 try:
                     history = await self.api.get_charge_history(device_id)
                     self.charge_history[device_id] = history
-                    _LOGGER.debug(
-                        "EV device %s charge history entries: %d",
-                        device.get("name"),
-                        len(history),
-                    )
+                    if self._first_run:
+                        _LOGGER.info(
+                            "EV device %s charge history (%d entries): %s",
+                            device.get("name"),
+                            len(history),
+                            history[:3] if history else "empty",
+                        )
                 except Exception as err:
-                    _LOGGER.debug(
-                        "Could not fetch charge history for %s: %s",
-                        device.get("name"),
-                        err,
-                    )
+                    if self._first_run:
+                        _LOGGER.info(
+                            "Could not fetch charge history for %s: %s",
+                            device.get("name"),
+                            err,
+                        )
 
+            self._first_run = False
             return devices
         except UnifiConnectAPIError as err:
             raise UpdateFailed(f"Error fetching UniFi Connect data: {err}") from err

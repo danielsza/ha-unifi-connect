@@ -5,12 +5,17 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, DEVICE_PLATFORM_SE21, ACTION_BRIGHTNESS, ACTION_VOLUME
+from .const import (
+    DOMAIN, DEVICE_PLATFORM_SE21, ACTION_BRIGHTNESS, ACTION_VOLUME,
+    EV_ACTION_SET_MAX_OUTPUT, EV_ACTION_BRIGHTNESS,
+)
+from .coordinator import _is_ev_device
 from .entity import UnifiConnectEntity
 from .hub import UnifiConnectHub
 
 _LOGGER = logging.getLogger(__name__)
 
+# SE21 Display number entities
 NUMBER_ENTITIES = [
     {
         "feature_key": "brightness",
@@ -34,6 +39,36 @@ NUMBER_ENTITIES = [
     },
 ]
 
+# EV Station number entities - use perform_action with actual action IDs
+EV_NUMBER_ENTITIES = [
+    {
+        "shadow_key": "maxOutput",
+        "feature_key": "maxOutput",
+        "name_suffix": "Maximum Output",
+        "unique_suffix": "max_output_setting",
+        "action_id": EV_ACTION_SET_MAX_OUTPUT,
+        "action_name": "set_max_output_amp",
+        "default_min": 6,
+        "default_max": 40,
+        "step": 1,
+        "icon": "mdi:current-ac",
+        "unit": "A",
+    },
+    {
+        "shadow_key": "brightness",
+        "feature_key": "brightness",
+        "name_suffix": "Brightness",
+        "unique_suffix": "ev_brightness_ctrl",
+        "action_id": EV_ACTION_BRIGHTNESS,
+        "action_name": "brightness",
+        "default_min": 0,
+        "default_max": 255,
+        "step": 1,
+        "icon": "mdi:brightness-6",
+        "unit": None,
+    },
+]
+
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -43,13 +78,22 @@ async def async_setup_entry(
     entities: list[NumberEntity] = []
 
     for device in hub.coordinator.data or []:
-        if device.get("type", {}).get("platform") != DEVICE_PLATFORM_SE21:
-            continue
+        platform = device.get("type", {}).get("platform")
 
-        features = device.get("featureFlags", {})
-        for config in NUMBER_ENTITIES:
-            if config["feature_key"] in features:
-                entities.append(DisplayNumberSlider(hub, device, config))
+        # SE21 Display entities
+        if platform == DEVICE_PLATFORM_SE21:
+            features = device.get("featureFlags", {})
+            for config in NUMBER_ENTITIES:
+                if config["feature_key"] in features:
+                    entities.append(DisplayNumberSlider(hub, device, config))
+
+        # EV Station entities
+        if _is_ev_device(device):
+            shadow = device.get("shadow", {})
+            features = device.get("featureFlags", {})
+            for config in EV_NUMBER_ENTITIES:
+                if config["shadow_key"] in shadow:
+                    entities.append(EVNumberSlider(hub, device, config, features))
 
     async_add_entities(entities)
 
@@ -67,6 +111,44 @@ class DisplayNumberSlider(UnifiConnectEntity, NumberEntity):
         self._attr_native_min_value = feature_range.get("min", config["default_min"])
         self._attr_native_max_value = feature_range.get("max", config["default_max"])
         self._attr_native_step = 1
+        self._attr_mode = "slider"
+
+    @property
+    def native_value(self):
+        return self._get_shadow().get(self._shadow_key, 0)
+
+    async def async_set_native_value(self, value: float):
+        await self._hub.api.perform_action(
+            self._device_id,
+            self._action_id,
+            self._action_name,
+            {"value": int(value)},
+        )
+        await self.coordinator.async_request_refresh()
+
+
+class EVNumberSlider(UnifiConnectEntity, NumberEntity):
+    """Number slider for EV Station controls using perform_action."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict, config: dict, features: dict):
+        super().__init__(hub, device, config["name_suffix"], config["unique_suffix"])
+        self._shadow_key = config["shadow_key"]
+        self._action_id = config["action_id"]
+        self._action_name = config["action_name"]
+        self._attr_icon = config.get("icon")
+        if config.get("unit"):
+            self._attr_native_unit_of_measurement = config["unit"]
+
+        # Use featureFlags for min/max if available, otherwise use defaults
+        feature_range = features.get(config.get("feature_key", ""), {})
+        if isinstance(feature_range, dict):
+            self._attr_native_min_value = feature_range.get("min", config["default_min"])
+            self._attr_native_max_value = feature_range.get("max", config["default_max"])
+        else:
+            self._attr_native_min_value = config["default_min"]
+            self._attr_native_max_value = config["default_max"]
+
+        self._attr_native_step = config.get("step", 1)
         self._attr_mode = "slider"
 
     @property

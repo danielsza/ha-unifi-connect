@@ -1,11 +1,11 @@
 """Sensor platform for UniFi Connect EV Station devices.
 
-Exposes real-time charging data (power, current, voltage, energy) and
-charge session history from the UniFi Connect API.
-
-Shadow field names are discovered dynamically — the integration logs the
-full shadow dict at DEBUG level on every poll so users can identify new
-fields if the API changes.
+Exposes read-only charging status and charge session history.
+Writable settings are in their respective control platforms:
+  number.py  - Maximum Output, Brightness
+  select.py  - Station Mode, Fallback Security
+  switch.py  - Status Light, Locating
+  text.py    - Display Label, Support Information
 """
 
 from __future__ import annotations
@@ -22,89 +22,55 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
-    UnitOfElectricPotential,
     UnitOfEnergy,
-    UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, EV_DEVICE_PLATFORMS
+from .const import DOMAIN
 from .coordinator import _is_ev_device
 from .entity import UnifiConnectEntity
 from .hub import UnifiConnectHub
 
 _LOGGER = logging.getLogger(__name__)
 
-# Mapping of sensor definitions.
-# Each entry tries multiple possible shadow key names (the UniFi API is
-# not publicly documented, so we cover likely variations).
+# Read-only sensor definitions from EV Station shadow
 EV_SENSOR_DEFINITIONS: list[dict[str, Any]] = [
     {
-        "name_suffix": "Charging Power",
-        "unique_suffix": "charging_power",
-        "shadow_keys": ["currentPower", "power", "chargingPower", "outputPower"],
-        "device_class": SensorDeviceClass.POWER,
-        "state_class": SensorStateClass.MEASUREMENT,
-        "unit": UnitOfPower.WATT,
-        "icon": "mdi:flash",
+        "name_suffix": "Charging Status",
+        "unique_suffix": "charging_status",
+        "shadow_key": "chargingStatus",
+        "device_class": None,
+        "state_class": None,
+        "unit": None,
+        "icon": "mdi:ev-station",
     },
     {
-        "name_suffix": "Charging Current",
-        "unique_suffix": "charging_current",
-        "shadow_keys": ["currentAmps", "current", "chargingCurrent", "outputCurrent"],
+        "name_suffix": "Max Current",
+        "unique_suffix": "max_current",
+        "shadow_key": "maxCurrent",
         "device_class": SensorDeviceClass.CURRENT,
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": UnitOfElectricCurrent.AMPERE,
         "icon": "mdi:current-ac",
     },
     {
-        "name_suffix": "Voltage",
-        "unique_suffix": "voltage",
-        "shadow_keys": ["voltage", "lineVoltage", "inputVoltage"],
-        "device_class": SensorDeviceClass.VOLTAGE,
-        "state_class": SensorStateClass.MEASUREMENT,
-        "unit": UnitOfElectricPotential.VOLT,
-        "icon": "mdi:sine-wave",
-    },
-    {
-        "name_suffix": "Session Energy",
-        "unique_suffix": "session_energy",
-        "shadow_keys": [
-            "energyDelivered",
-            "sessionEnergy",
-            "chargeEnergy",
-            "energy",
-            "totalEnergy",
-        ],
-        "device_class": SensorDeviceClass.ENERGY,
-        "state_class": SensorStateClass.TOTAL_INCREASING,
-        "unit": UnitOfEnergy.WATT_HOUR,
-        "icon": "mdi:battery-charging",
-    },
-    {
-        "name_suffix": "Max Current",
-        "unique_suffix": "max_current",
-        "shadow_keys": ["maxCurrent", "maxAmps", "currentLimit"],
-        "device_class": SensorDeviceClass.CURRENT,
-        "state_class": SensorStateClass.MEASUREMENT,
-        "unit": UnitOfElectricCurrent.AMPERE,
-        "icon": "mdi:speedometer",
-    },
-    {
-        "name_suffix": "Charge State",
-        "unique_suffix": "charge_state",
-        "shadow_keys": [
-            "chargeState",
-            "chargingState",
-            "state",
-            "status",
-            "evState",
-        ],
+        "name_suffix": "Derating",
+        "unique_suffix": "derating",
+        "shadow_key": "derating",
         "device_class": None,
         "state_class": None,
         "unit": None,
-        "icon": "mdi:ev-station",
+        "icon": "mdi:thermometer-alert",
+    },
+    {
+        "name_suffix": "Error Info",
+        "unique_suffix": "error_info",
+        "shadow_key": "errorInfo",
+        "device_class": None,
+        "state_class": None,
+        "unit": None,
+        "icon": "mdi:alert-circle",
     },
 ]
 
@@ -122,47 +88,27 @@ async def async_setup_entry(
 
         shadow = device.get("shadow", {})
         _LOGGER.info(
-            "Setting up EV sensors for %s (platform: %s). Shadow keys: %s",
+            "Setting up EV sensors for %s (platform: %s)",
             device.get("name"),
             device.get("type", {}).get("platform"),
-            list(shadow.keys()),
         )
 
-        # Create sensors for each definition where at least one shadow key exists
+        # Create read-only sensors for matching shadow keys
         for sensor_def in EV_SENSOR_DEFINITIONS:
-            matched_key = _find_shadow_key(shadow, sensor_def["shadow_keys"])
-            if matched_key is not None:
-                entities.append(
-                    EVShadowSensor(hub, device, sensor_def, matched_key)
-                )
-                _LOGGER.debug(
-                    "  -> Created sensor '%s' using shadow key '%s'",
-                    sensor_def["name_suffix"],
-                    matched_key,
-                )
-            else:
-                _LOGGER.debug(
-                    "  -> Skipped sensor '%s' (no matching shadow key found from %s)",
-                    sensor_def["name_suffix"],
-                    sensor_def["shadow_keys"],
-                )
+            if sensor_def["shadow_key"] in shadow:
+                entities.append(EVShadowSensor(hub, device, sensor_def))
 
-        # Charge history sensor (total energy across all sessions)
+        # Charge history sensors
         entities.append(EVChargeHistoryEnergySensor(hub, device))
         entities.append(EVChargeHistoryCountSensor(hub, device))
         entities.append(EVLastSessionSensor(hub, device))
 
+        # Raw shadow dump sensor for debugging
+        entities.append(EVShadowDumpSensor(hub, device))
+
     if entities:
         _LOGGER.info("Adding %d EV sensor entities", len(entities))
     async_add_entities(entities)
-
-
-def _find_shadow_key(shadow: dict, candidates: list[str]) -> str | None:
-    """Return the first matching key found in the shadow dict."""
-    for key in candidates:
-        if key in shadow:
-            return key
-    return None
 
 
 class EVShadowSensor(UnifiConnectEntity, SensorEntity):
@@ -173,10 +119,9 @@ class EVShadowSensor(UnifiConnectEntity, SensorEntity):
         hub: UnifiConnectHub,
         device: dict,
         sensor_def: dict[str, Any],
-        shadow_key: str,
     ):
         super().__init__(hub, device, sensor_def["name_suffix"], sensor_def["unique_suffix"])
-        self._shadow_key = shadow_key
+        self._shadow_key = sensor_def["shadow_key"]
         self._attr_device_class = sensor_def["device_class"]
         self._attr_state_class = sensor_def["state_class"]
         self._attr_native_unit_of_measurement = sensor_def["unit"]
@@ -184,31 +129,57 @@ class EVShadowSensor(UnifiConnectEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return the sensor value from shadow data."""
         value = self._get_shadow().get(self._shadow_key)
         if value is None:
             return None
-        # Numeric sensors should return a number
         if self._attr_device_class in (
             SensorDeviceClass.POWER,
             SensorDeviceClass.CURRENT,
-            SensorDeviceClass.VOLTAGE,
             SensorDeviceClass.ENERGY,
         ):
             try:
                 return round(float(value), 2)
             except (ValueError, TypeError):
                 return None
+        if isinstance(value, (dict, list)):
+            return str(value)
         return value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose the raw shadow key name for debugging."""
-        return {"shadow_key": self._shadow_key}
+        raw = self._get_shadow().get(self._shadow_key)
+        attrs = {"shadow_key": self._shadow_key}
+        if isinstance(raw, dict):
+            attrs.update(raw)
+        return attrs
+
+
+class EVShadowDumpSensor(UnifiConnectEntity, SensorEntity):
+    """Diagnostic sensor that exposes all shadow keys as attributes."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub, device, "Shadow Data", "shadow_dump")
+        self._attr_icon = "mdi:bug"
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def native_value(self):
+        return len(self._get_shadow())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        shadow = self._get_shadow()
+        attrs: dict[str, Any] = {}
+        for key, value in shadow.items():
+            if isinstance(value, (dict, list)):
+                attrs[key] = str(value)
+            else:
+                attrs[key] = value
+        return attrs
 
 
 class EVChargeHistoryEnergySensor(UnifiConnectEntity, SensorEntity):
-    """Sensor showing total energy delivered across all charge sessions."""
+    """Total energy delivered across all charge sessions."""
 
     def __init__(self, hub: UnifiConnectHub, device: dict):
         super().__init__(hub, device, "Total Energy Delivered", "total_energy_delivered")
@@ -219,18 +190,17 @@ class EVChargeHistoryEnergySensor(UnifiConnectEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Sum energy from charge history sessions."""
         history = self.coordinator.charge_history.get(self._device_id, [])
         if not history:
             return None
         total = 0.0
         for session in history:
-            # Try common field names for energy per session
             energy = (
                 session.get("energyDelivered")
                 or session.get("energy")
                 or session.get("totalEnergy")
                 or session.get("wh")
+                or session.get("kwh")
                 or 0
             )
             try:
@@ -241,7 +211,6 @@ class EVChargeHistoryEnergySensor(UnifiConnectEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose session count and last session info."""
         history = self.coordinator.charge_history.get(self._device_id, [])
         attrs: dict[str, Any] = {"total_sessions": len(history)}
         if history:
@@ -251,7 +220,7 @@ class EVChargeHistoryEnergySensor(UnifiConnectEntity, SensorEntity):
 
 
 class EVChargeHistoryCountSensor(UnifiConnectEntity, SensorEntity):
-    """Sensor showing number of charge sessions."""
+    """Number of charge sessions."""
 
     def __init__(self, hub: UnifiConnectHub, device: dict):
         super().__init__(hub, device, "Charge Sessions", "charge_sessions")
@@ -265,7 +234,7 @@ class EVChargeHistoryCountSensor(UnifiConnectEntity, SensorEntity):
 
 
 class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
-    """Sensor showing details of the most recent charge session."""
+    """Most recent charge session details."""
 
     def __init__(self, hub: UnifiConnectHub, device: dict):
         super().__init__(hub, device, "Last Charge Session", "last_charge_session")
@@ -275,7 +244,6 @@ class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return energy from the most recent session."""
         history = self.coordinator.charge_history.get(self._device_id, [])
         if not history:
             return None
@@ -285,6 +253,7 @@ class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
             or last.get("energy")
             or last.get("totalEnergy")
             or last.get("wh")
+            or last.get("kwh")
         )
         if energy is not None:
             try:
@@ -295,15 +264,15 @@ class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Expose all fields from the last session for discovery."""
         history = self.coordinator.charge_history.get(self._device_id, [])
         if not history:
             return {}
         last = history[-1] if isinstance(history[-1], dict) else {}
         attrs: dict[str, Any] = {}
         for key, value in last.items():
-            # Convert timestamps to readable format
-            if isinstance(value, (int, float)) and key.lower().endswith(("time", "at", "timestamp")):
+            if isinstance(value, (int, float)) and any(
+                key.lower().endswith(s) for s in ("time", "at", "timestamp")
+            ):
                 try:
                     attrs[key] = datetime.fromtimestamp(
                         value / 1000 if value > 1e12 else value,
