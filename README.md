@@ -4,7 +4,7 @@
 [![GitHub License](https://img.shields.io/github/license/iamslan/ha-unifi-connect)](LICENSE)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2025.2.5%2B-blue)
 
-A custom [Home Assistant](https://www.home-assistant.io/) integration for **UniFi Connect** display devices, using the local UniFi Connect API. Currently supports the **UniFi Connect Display SE 21**.
+A custom [Home Assistant](https://www.home-assistant.io/) integration for **UniFi Connect** devices, using the local UniFi Connect API. Supports the **UniFi Connect Display SE 21** and **UniFi EV Station** devices (EV Station, EV Station Pro, EV Station Lite).
 
 ## Prerequisites
 
@@ -20,6 +20,8 @@ You must create a **local-only** UniFi OS account:
 
 ## Supported Entities
 
+### Display SE 21
+
 | Platform | Entity | Description |
 |----------|--------|-------------|
 | Switch | Display Power | Turn the display on/off |
@@ -34,6 +36,22 @@ You must create a **local-only** UniFi OS account:
 | Text | Web URL | Set the URL to display (in Web mode) |
 | Button | Reload Web Page | Refresh the currently displayed web page |
 
+### EV Station (EV Station, EV Station Pro, EV Station Lite)
+
+| Platform | Entity | Description |
+|----------|--------|-------------|
+| Sensor | Charging Power | Real-time power draw (W) |
+| Sensor | Charging Current | Real-time current draw (A) |
+| Sensor | Voltage | Line voltage (V) |
+| Sensor | Session Energy | Energy delivered in current session (Wh) |
+| Sensor | Max Current | Configured current limit (A) |
+| Sensor | Charge State | Current charging state (idle, charging, etc.) |
+| Sensor | Total Energy Delivered | Cumulative energy across all sessions (Wh) |
+| Sensor | Charge Sessions | Total number of charge sessions |
+| Sensor | Last Charge Session | Energy delivered in the most recent session (Wh) |
+
+> **Note:** EV sensors are discovered dynamically from the device shadow. The integration uses `power_stats_single` actions to request fresh real-time data each polling cycle, and fetches session history from the `/chargeHistory` endpoint. If your device exposes different field names, enable DEBUG logging for `custom_components.unifi_connect` to see the raw shadow data and [open an issue](https://github.com/danielsza/ha-unifi-connect/issues) with the output.
+
 ## Installation
 
 ### HACS (Recommended)
@@ -41,7 +59,7 @@ You must create a **local-only** UniFi OS account:
 1. Open **HACS > Integrations** in Home Assistant.
 2. Click the menu (**⋮**) and select **Custom repositories**.
 3. Add this repository:
-   - **URL:** `https://github.com/iamslan/ha-unifi-connect`
+   - **URL:** `https://github.com/danielsza/ha-unifi-connect`
    - **Category:** Integration
 4. Search for **UniFi Connect** and install it.
 5. Restart Home Assistant.
@@ -80,8 +98,13 @@ You must create a **local-only** UniFi OS account:
 | Device | Platform ID |
 |--------|-------------|
 | UniFi Connect Display SE 21 | `UC-Display-SE-21` |
+| UniFi EV Station | `UC-EV-Station` |
+| UniFi EV Station Pro | `UC-EV-Station-Pro` |
+| UniFi EV Station Lite | `UC-EV-Station-Lite` |
 
-Additional UniFi Connect devices may work but are untested. If you have a different device and it works (or doesn't), please [open an issue](https://github.com/iamslan/ha-unifi-connect/issues).
+EV devices are also detected by the presence of `power_stats_single` in their `supportedActions`, so new EV models should work automatically.
+
+Additional UniFi Connect devices may work but are untested. If you have a different device and it works (or doesn't), please [open an issue](https://github.com/danielsza/ha-unifi-connect/issues).
 
 ## Contributing
 
