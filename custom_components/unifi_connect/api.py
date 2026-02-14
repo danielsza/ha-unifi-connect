@@ -141,6 +141,43 @@ class UnifiConnectAPI:
                 f"{method} {path} unexpected error: {err}"
             ) from err
 
+    async def get_charge_history(self, device_id: str) -> list[dict[str, Any]]:
+        """Fetch charge history for an EV Station device."""
+        result = await self._request("GET", f"api/v2/devices/{device_id}/chargeHistory")
+        if isinstance(result, list):
+            return result
+        if isinstance(result, dict):
+            # API may wrap data in a key
+            return result.get("data", result.get("history", []))
+        return []
+
+    async def request_power_stats(
+        self, device_id: str, action_id: str
+    ) -> dict[str, Any] | None:
+        """Trigger a power_stats_single action to refresh real-time power data.
+
+        The fresh data will appear in the device shadow on the next poll.
+        Returns the API response if any data is included, else None.
+        """
+        path = f"api/v2/devices/{device_id}/status"
+        payload: dict[str, Any] = {"id": action_id, "name": "power_stats_single"}
+        extra_headers = {
+            "referer": f"https://{self._host}/connect/devices/all/{device_id}",
+            "origin": f"https://{self._host}",
+        }
+
+        try:
+            result = await self._request(
+                "PATCH", path, json=payload, extra_headers=extra_headers
+            )
+            _LOGGER.debug("power_stats_single response for %s: %s", device_id, result)
+            return result if isinstance(result, dict) else None
+        except UnifiConnectAPIError as err:
+            _LOGGER.warning(
+                "Failed to request power_stats for %s: %s", device_id, err
+            )
+            return None
+
     def _get_login_url(self) -> str:
         if self._controller_type == CONTROLLER_UDMP:
             return f"https://{self._host}/api/auth/login"

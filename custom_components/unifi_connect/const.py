@@ -14,11 +14,28 @@ CONF_CONTROLLER_TYPE = "controller_type"
 CONTROLLER_UDMP = "Unifi Dream Machine (inc Pro)"
 CONTROLLER_OTHER = "Other Unifi Controllers"
 
-PLATFORMS = [Platform.SWITCH, Platform.SELECT, Platform.NUMBER, Platform.TEXT, Platform.BUTTON]
+PLATFORMS = [
+    Platform.SWITCH,
+    Platform.SELECT,
+    Platform.NUMBER,
+    Platform.TEXT,
+    Platform.BUTTON,
+    Platform.SENSOR,
+]
 
+# Device platform identifiers
 DEVICE_PLATFORM_SE21 = "UC-Display-SE-21"
+DEVICE_PLATFORM_EV_STATION = "UC-EV-Station"
+DEVICE_PLATFORM_EV_STATION_PRO = "UC-EV-Station-Pro"
+DEVICE_PLATFORM_EV_STATION_LITE = "UC-EV-Station-Lite"
 
-# Action IDs for the UniFi Connect API
+EV_DEVICE_PLATFORMS = [
+    DEVICE_PLATFORM_EV_STATION,
+    DEVICE_PLATFORM_EV_STATION_PRO,
+    DEVICE_PLATFORM_EV_STATION_LITE,
+]
+
+# Action IDs for the UniFi Connect API — Display SE 21
 ACTION_REFRESH_WEBSITE = "416cef71-50b4-4983-91cc-e6d8dcb82505"
 ACTION_BRIGHTNESS = "521c3110-8f8e-400a-a06f-a529093c7a1c"
 ACTION_VOLUME = "26f1b4d8-9fea-4a7c-94a5-daf70e84cd5b"
@@ -35,3 +52,8 @@ ACTION_DISABLE_SLEEP = "b2c11736-50cc-4aa9-926a-feab64322bfb"
 ACTION_ENABLE_AUTO_SLEEP = "4b723196-e4d7-4b64-935b-07efc34b9b2f"
 ACTION_DISABLE_AUTO_SLEEP = "2cd90d8a-edff-4fe8-b941-130d6b0a3f02"
 ACTION_LOAD_WEBSITE = "2d047a97-9882-43f0-b953-88309c0669a8"
+
+# EV Station action names (action IDs are discovered dynamically from supportedActions)
+EV_ACTION_POWER_STATS = "power_stats"
+EV_ACTION_POWER_STATS_KEEPALIVE = "power_stats_keepalive"
+EV_ACTION_POWER_STATS_SINGLE = "power_stats_single"
