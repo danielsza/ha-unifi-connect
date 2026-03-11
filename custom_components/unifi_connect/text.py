@@ -24,7 +24,8 @@ EV_TEXT_ENTITIES = [
         "action_id": EV_ACTION_SET_DISPLAY_LABEL,
         "action_name": "set_display_label",
         "icon": "mdi:label",
-        "max_length": 128,
+        "max_length": 15,
+        "args_builder": lambda value: {"enableDisplayLabel": True, "displayLabel": value},
     },
     {
         "shadow_key": "adminMessage",
@@ -34,6 +35,7 @@ EV_TEXT_ENTITIES = [
         "action_name": "set_admin_message",
         "icon": "mdi:message-text",
         "max_length": 512,
+        "args_builder": lambda value: {"adminMessage": value},
     },
 ]
 
@@ -96,6 +98,7 @@ class EVText(UnifiConnectEntity, TextEntity):
         self._attr_icon = config.get("icon")
         self._attr_native_min = 0
         self._attr_native_max = config.get("max_length", 256)
+        self._args_builder = config.get("args_builder")
 
     @property
     def native_value(self):
@@ -103,10 +106,11 @@ class EVText(UnifiConnectEntity, TextEntity):
         return str(value) if value is not None else ""
 
     async def async_set_value(self, value: str) -> None:
+        args = self._args_builder(value) if self._args_builder else {"value": value}
         await self._hub.api.perform_action(
             self._device_id,
             self._action_id,
             self._action_name,
-            {"value": value},
+            args,
         )
         await self.coordinator.async_request_refresh()

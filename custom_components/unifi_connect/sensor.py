@@ -34,6 +34,25 @@ from .hub import UnifiConnectHub
 
 _LOGGER = logging.getLogger(__name__)
 
+# Ordered list of keys to try when extracting energy from a charge session.
+# The UniFi Connect API returns energy in kWh under the "energy" key.
+_ENERGY_KEYS = ("energyDelivered", "energy", "totalEnergy", "kwh", "wh")
+
+
+def _extract_energy(session: dict) -> float | None:
+    """Extract energy value from a charge session dict.
+
+    Uses explicit ``is not None`` checks so that a legitimate ``0``
+    value is returned instead of falling through to the next key
+    (plain ``or`` chains treat 0 as falsy).
+    """
+    for key in _ENERGY_KEYS:
+        value = session.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 # Read-only sensor definitions from EV Station shadow
 EV_SENSOR_DEFINITIONS: list[dict[str, Any]] = [
     {
@@ -185,7 +204,7 @@ class EVChargeHistoryEnergySensor(UnifiConnectEntity, SensorEntity):
         super().__init__(hub, device, "Total Energy Delivered", "total_energy_delivered")
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
-        self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_icon = "mdi:lightning-bolt-circle"
 
     @property
@@ -195,14 +214,7 @@ class EVChargeHistoryEnergySensor(UnifiConnectEntity, SensorEntity):
             return None
         total = 0.0
         for session in history:
-            energy = (
-                session.get("energyDelivered")
-                or session.get("energy")
-                or session.get("totalEnergy")
-                or session.get("wh")
-                or session.get("kwh")
-                or 0
-            )
+            energy = _extract_energy(session)
             try:
                 total += float(energy)
             except (ValueError, TypeError):
@@ -239,7 +251,7 @@ class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
     def __init__(self, hub: UnifiConnectHub, device: dict):
         super().__init__(hub, device, "Last Charge Session", "last_charge_session")
         self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_native_unit_of_measurement = UnitOfEnergy.WATT_HOUR
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_icon = "mdi:ev-plug-type2"
 
     @property
@@ -248,13 +260,7 @@ class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
         if not history:
             return None
         last = history[-1] if isinstance(history[-1], dict) else {}
-        energy = (
-            last.get("energyDelivered")
-            or last.get("energy")
-            or last.get("totalEnergy")
-            or last.get("wh")
-            or last.get("kwh")
-        )
+        energy = _extract_energy(last)
         if energy is not None:
             try:
                 return round(float(energy), 2)
