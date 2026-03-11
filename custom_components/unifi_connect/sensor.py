@@ -134,6 +134,10 @@ def _get_tou_rate(period: str, hass=None) -> float:
 
     Reads from input_number helpers if they exist, otherwise uses
     Ontario TOU defaults (as of 2025).
+
+    Supports two helper naming conventions:
+      - input_number.tou_rate_off_peak  (in ¢/kWh, divided by 100)
+      - input_number.ev_rate_off_peak   (in $/kWh, used directly)
     """
     defaults = {
         "off_peak": 0.087,
@@ -141,12 +145,28 @@ def _get_tou_rate(period: str, hass=None) -> float:
         "on_peak": 0.180,
     }
     if hass:
-        helper_map = {
+        # Try ¢/kWh helpers first (existing house energy helpers)
+        cents_map = {
+            "off_peak": "input_number.tou_rate_off_peak",
+            "mid_peak": "input_number.tou_rate_mid_peak",
+            "on_peak": "input_number.tou_rate_on_peak",
+        }
+        entity_id = cents_map.get(period)
+        if entity_id:
+            state = hass.states.get(entity_id)
+            if state and state.state not in ("unknown", "unavailable"):
+                try:
+                    return float(state.state) / 100.0  # ¢ to $
+                except (ValueError, TypeError):
+                    pass
+
+        # Fall back to $/kWh helpers
+        dollars_map = {
             "off_peak": "input_number.ev_rate_off_peak",
             "mid_peak": "input_number.ev_rate_mid_peak",
             "on_peak": "input_number.ev_rate_on_peak",
         }
-        entity_id = helper_map.get(period)
+        entity_id = dollars_map.get(period)
         if entity_id:
             state = hass.states.get(entity_id)
             if state and state.state not in ("unknown", "unavailable"):
