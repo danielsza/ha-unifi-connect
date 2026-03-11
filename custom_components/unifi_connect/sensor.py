@@ -201,7 +201,7 @@ class EVChargeHistoryEnergySensor(UnifiConnectEntity, SensorEntity):
     """Total energy delivered across all charge sessions."""
 
     def __init__(self, hub: UnifiConnectHub, device: dict):
-        super().__init__(hub, device, "Total Energy Delivered", "total_energy_delivered")
+        super().__init__(hub, device, "Total Energy Delivered", "total_energy_kwh")
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
@@ -249,7 +249,7 @@ class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
     """Most recent charge session details."""
 
     def __init__(self, hub: UnifiConnectHub, device: dict):
-        super().__init__(hub, device, "Last Charge Session", "last_charge_session")
+        super().__init__(hub, device, "Last Charge Session", "last_session_kwh")
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_icon = "mdi:ev-plug-type2"
