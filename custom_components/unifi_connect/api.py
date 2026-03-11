@@ -141,14 +141,27 @@ class UnifiConnectAPI:
                 f"{method} {path} unexpected error: {err}"
             ) from err
 
-    async def get_charge_history(self, device_id: str) -> list[dict[str, Any]]:
-        """Fetch charge history for an EV Station device."""
-        result = await self._request("GET", f"api/v2/devices/{device_id}/chargeHistory")
-        if isinstance(result, list):
-            return result
-        if isinstance(result, dict):
-            # API may wrap data in a key
-            return result.get("data", result.get("history", []))
+    async def get_charge_history(
+        self, device_id: str, limit: int = 10000
+    ) -> list[dict[str, Any]]:
+        """Fetch charge history for an EV Station device.
+
+        Attempts to fetch all sessions by passing a large limit parameter.
+        Falls back to no-param request if the API doesn't support it.
+        """
+        # Try with limit param first to get full history
+        for path in (
+            f"api/v2/devices/{device_id}/chargeHistory?limit={limit}",
+            f"api/v2/devices/{device_id}/chargeHistory",
+        ):
+            try:
+                result = await self._request("GET", path)
+                if isinstance(result, list):
+                    return result
+                if isinstance(result, dict):
+                    return result.get("data", result.get("history", []))
+            except UnifiConnectAPIError:
+                continue
         return []
 
     async def request_power_stats(
