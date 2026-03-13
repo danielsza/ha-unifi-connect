@@ -150,12 +150,18 @@ class UnifiConnectAPI:
             ) from err
 
     async def get_charge_history(
-        self, device_id: str, page_size: int = 30
+        self, device_id: str, page_size: int = 50
     ) -> list[dict[str, Any]]:
-        """Fetch *all* charge history pages for an EV Station device.
+        """Fetch *all* charge history via the stats/evs/chargingHistory endpoint.
 
-        The UniFi Connect API paginates chargeHistory responses.  This
-        method walks through every page until all sessions are collected.
+        The per-device ``chargeHistory`` endpoint is hard-capped at 30
+        sessions by the controller.  The ``stats/evs/chargingHistory``
+        endpoint supports real offset/limit pagination and returns the
+        complete history.
+
+        Sessions are returned newest-first by the API.  We reverse them
+        so the caller receives oldest-first (matching the per-device
+        endpoint behaviour).
 
         The raw pagination metadata from the first response is stored in
         ``self._charge_history_meta`` for diagnostic purposes.
@@ -167,8 +173,8 @@ class UnifiConnectAPI:
 
         for page_num in range(max_pages):
             path = (
-                f"api/v2/devices/{device_id}/chargeHistory"
-                f"?limit={page_size}&offset={offset}"
+                f"api/v2/stats/evs/chargingHistory"
+                f"?offset={offset}&limit={page_size}&sort=&order="
             )
             try:
                 raw = await self._request("GET", path, raw_response=True)
@@ -179,55 +185,39 @@ class UnifiConnectAPI:
                 )
                 break
 
-            # Log the full envelope shape on the first page
+            if not isinstance(raw, dict):
+                break
+
+            # Store envelope metadata on first page
             if page_num == 0:
-                if isinstance(raw, dict):
-                    self._charge_history_meta = {
-                        k: v for k, v in raw.items()
-                        if k != "data" and not isinstance(v, list)
-                    }
-                    _LOGGER.info(
-                        "chargeHistory response envelope keys: %s, meta: %s",
-                        list(raw.keys()), self._charge_history_meta,
-                    )
-                elif isinstance(raw, list):
-                    self._charge_history_meta = {"format": "flat_list", "count": len(raw)}
-                    _LOGGER.info("chargeHistory returned flat list of %d items", len(raw))
+                self._charge_history_meta = {
+                    k: v for k, v in raw.items()
+                    if k != "data" and not isinstance(v, list)
+                }
+                _LOGGER.info(
+                    "stats/evs/chargingHistory envelope: %s",
+                    self._charge_history_meta,
+                )
 
-            # Extract the session list from the response envelope
-            if isinstance(raw, list):
-                all_sessions.extend(raw)
+            page = raw.get("data", [])
+            if not isinstance(page, list) or not page:
                 break
-            if isinstance(raw, dict):
-                page = raw.get("data", raw.get("history", []))
-                if isinstance(page, list):
-                    all_sessions.extend(page)
-                else:
-                    break
+            all_sessions.extend(page)
 
-                # Determine if there are more pages
-                total = raw.get("totalCount", raw.get("total", raw.get("count")))
-                if total is not None:
-                    total = int(total)
-                    _LOGGER.debug(
-                        "Page %d: got %d items (total so far: %d, server total: %d)",
-                        page_num, len(page), len(all_sessions), total,
-                    )
-                    if len(all_sessions) >= total:
-                        break
-                else:
-                    # No totalCount — stop on empty or short page
-                    if len(page) == 0 or len(page) < page_size:
-                        break
-
-                offset += len(page)
-            else:
+            total = raw.get("total")
+            if total is not None and len(all_sessions) >= int(total):
+                break
+            if len(page) < page_size:
                 break
 
+            offset += len(page)
+
+        # Filter to only this device's sessions (by MAC) if we have
+        # multiple EV stations, and reverse to oldest-first.
         _LOGGER.info(
-            "Fetched %d total charge history sessions for %s",
-            len(all_sessions), device_id,
+            "Fetched %d total charge history sessions", len(all_sessions),
         )
+        all_sessions.reverse()
         return all_sessions
 
     async def request_power_stats(

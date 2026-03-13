@@ -35,8 +35,9 @@ from .hub import UnifiConnectHub
 _LOGGER = logging.getLogger(__name__)
 
 # Ordered list of keys to try when extracting energy from a charge session.
-# The UniFi Connect API returns energy in kWh under the "energy" key.
-_ENERGY_KEYS = ("energyDelivered", "energy", "totalEnergy", "kwh", "wh")
+# The stats/evs/chargingHistory endpoint uses "powerUsage" (kWh).
+# The per-device chargeHistory endpoint uses "energy".
+_ENERGY_KEYS = ("powerUsage", "energyDelivered", "energy", "totalEnergy", "kwh", "wh")
 
 
 def _extract_energy(session: dict) -> float | None:
@@ -51,6 +52,48 @@ def _extract_energy(session: dict) -> float | None:
         if value is not None:
             return value
     return None
+
+
+def _extract_charge_start(session: dict) -> float:
+    """Extract the charge start timestamp (Unix seconds) from a session.
+
+    The stats endpoint uses ``date`` (Unix seconds).
+    The per-device endpoint uses ``chargeStart`` (Unix seconds or ISO).
+    """
+    # stats endpoint: "date" is unix seconds
+    ts = session.get("date")
+    if ts is not None:
+        try:
+            return float(ts)
+        except (ValueError, TypeError):
+            pass
+    # per-device endpoint
+    ts = session.get("chargeStart", 0)
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts).timestamp()
+        except (ValueError, TypeError):
+            return 0
+    return float(ts) if ts else 0
+
+
+def _extract_charge_end(session: dict) -> float:
+    """Extract the charge end timestamp from a session."""
+    # stats endpoint: date + totalTime
+    start = session.get("date")
+    total_time = session.get("totalTime")
+    if start is not None and total_time is not None:
+        try:
+            return float(start) + float(total_time)
+        except (ValueError, TypeError):
+            pass
+    # per-device endpoint
+    return float(session.get("chargeEnd", 0) or 0)
+
+
+def _extract_source(session: dict) -> str:
+    """Extract the session source/mode."""
+    return session.get("usageMode", session.get("source", ""))
 
 
 def _parse_duration_seconds(value) -> float:
@@ -194,13 +237,7 @@ def _compute_session_cost(session: dict, hass=None) -> dict:
         except (ValueError, TypeError):
             energy = 0.0
 
-    charge_start = session.get("chargeStart", 0)
-    if isinstance(charge_start, str):
-        try:
-            charge_start = datetime.fromisoformat(charge_start).timestamp()
-        except (ValueError, TypeError):
-            charge_start = 0
-
+    charge_start = _extract_charge_start(session)
     period = _get_tou_period(charge_start)
     rate = _get_tou_rate(period, hass)
     cost = round(energy * rate, 2)
@@ -569,19 +606,29 @@ class EVLastSessionSensor(UnifiConnectEntity, SensorEntity):
         attrs["tou_period"] = cost_info["tou_period"]
         attrs["rate_per_kwh"] = cost_info["rate"]
         attrs["estimated_cost"] = cost_info["cost"]
-        for key, value in last.items():
-            if isinstance(value, (int, float)) and any(
-                key.lower().endswith(s) for s in ("time", "at", "timestamp")
-            ):
-                try:
-                    attrs[key] = datetime.fromtimestamp(
-                        value / 1000 if value > 1e12 else value,
-                        tz=timezone.utc,
-                    ).isoformat()
-                except (ValueError, OSError):
-                    attrs[key] = value
-            else:
-                attrs[key] = value
+        # Add formatted timestamps
+        charge_start = _extract_charge_start(last)
+        charge_end = _extract_charge_end(last)
+        if charge_start:
+            try:
+                attrs["charge_start"] = datetime.fromtimestamp(
+                    charge_start, tz=timezone.utc
+                ).isoformat()
+            except (ValueError, OSError):
+                attrs["charge_start"] = charge_start
+        if charge_end:
+            try:
+                attrs["charge_end"] = datetime.fromtimestamp(
+                    charge_end, tz=timezone.utc
+                ).isoformat()
+            except (ValueError, OSError):
+                attrs["charge_end"] = charge_end
+        attrs["source"] = _extract_source(last)
+        charge_time = last.get("chargeTime")
+        if charge_time is not None:
+            attrs["charge_time"] = _format_duration(
+                _parse_duration_seconds(charge_time)
+            )
         return attrs
 
 
@@ -606,9 +653,9 @@ class EVTotalChargingTimeSensor(UnifiConnectEntity, SensorEntity):
             if charge_time is not None:
                 total_seconds += _parse_duration_seconds(charge_time)
             else:
-                # Fallback: compute from start/end
-                start = session.get("chargeStart", 0)
-                end = session.get("chargeEnd", 0)
+                # Fallback: compute from start/end using schema helpers
+                start = _extract_charge_start(session)
+                end = _extract_charge_end(session)
                 if start and end:
                     total_seconds += max(0, end - start)
         hours = total_seconds / 3600.0
@@ -781,8 +828,8 @@ class EVChargeHistoryLogSensor(UnifiConnectEntity, SensorEntity):
             except (ValueError, TypeError):
                 energy_val = 0.0
 
-            charge_start = session.get("chargeStart", 0)
-            charge_end = session.get("chargeEnd", 0)
+            charge_start = _extract_charge_start(session)
+            charge_end = _extract_charge_end(session)
             charge_time_raw = session.get("chargeTime")
             charge_secs = _parse_duration_seconds(charge_time_raw) if charge_time_raw else 0
 
@@ -809,7 +856,7 @@ class EVChargeHistoryLogSensor(UnifiConnectEntity, SensorEntity):
                 "tou_period": cost_info["tou_period"],
                 "rate": cost_info["rate"],
                 "cost": cost_info["cost"],
-                "source": session.get("source", ""),
+                "source": _extract_source(session),
             })
 
         attrs = {"sessions": sessions, "total_sessions": len(sessions)}

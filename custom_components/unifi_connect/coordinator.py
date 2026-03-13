@@ -103,16 +103,26 @@ class UnifiConnectCoordinator(DataUpdateCoordinator):
                 if action_id:
                     await self.api.request_power_stats(device_id, action_id)
 
-                # Fetch charge history
+                # Fetch charge history from stats endpoint (all devices)
                 try:
-                    history = await self.api.get_charge_history(device_id)
+                    all_history = await self.api.get_charge_history(device_id)
+                    # Filter sessions for this device by MAC address
+                    device_mac = device.get("mac", "").upper()
+                    if device_mac:
+                        history = [
+                            s for s in all_history
+                            if s.get("mac", "").upper() == device_mac
+                        ]
+                    else:
+                        history = all_history
                     self.charge_history[device_id] = history
                     if self._first_run:
                         _LOGGER.info(
-                            "EV device %s charge history (%d entries): %s",
+                            "EV device %s charge history: %d sessions "
+                            "(from %d total across all devices)",
                             device.get("name"),
                             len(history),
-                            history[:3] if history else "empty",
+                            len(all_history),
                         )
                 except Exception as err:
                     if self._first_run:
