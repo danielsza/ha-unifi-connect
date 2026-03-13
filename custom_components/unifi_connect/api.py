@@ -96,8 +96,13 @@ class UnifiConnectAPI:
         json: dict | None = None,
         extra_headers: dict | None = None,
         _retry: bool = True,
+        raw_response: bool = False,
     ) -> Any:
         """Make an authenticated request with automatic 401 retry.
+
+        When *raw_response* is True, the full JSON body is returned as-is
+        (useful for paginated endpoints where the envelope contains
+        totalCount / offset metadata).
 
         Raises UnifiConnectAPIError on failure.
         """
@@ -120,10 +125,13 @@ class UnifiConnectAPI:
                             return await self._request(
                                 method, path, json=json,
                                 extra_headers=extra_headers, _retry=False,
+                                raw_response=raw_response,
                             )
                         raise UnifiConnectAPIError("Re-authentication failed")
                     if resp.status == 200:
                         data = await resp.json()
+                        if raw_response:
+                            return data
                         return data.get("data", data) if isinstance(data, dict) else data
                     raise UnifiConnectAPIError(
                         f"{method} {path} returned status {resp.status}"
@@ -142,27 +150,64 @@ class UnifiConnectAPI:
             ) from err
 
     async def get_charge_history(
-        self, device_id: str, limit: int = 10000
+        self, device_id: str, page_size: int = 100
     ) -> list[dict[str, Any]]:
-        """Fetch charge history for an EV Station device.
+        """Fetch *all* charge history pages for an EV Station device.
 
-        Attempts to fetch all sessions by passing a large limit parameter.
-        Falls back to no-param request if the API doesn't support it.
+        The UniFi Connect API paginates chargeHistory responses.  This
+        method walks through every page until all sessions are collected.
         """
-        # Try with limit param first to get full history
-        for path in (
-            f"api/v2/devices/{device_id}/chargeHistory?limit={limit}",
-            f"api/v2/devices/{device_id}/chargeHistory",
-        ):
+        all_sessions: list[dict[str, Any]] = []
+        offset = 0
+        max_pages = 50  # safety limit
+
+        for _ in range(max_pages):
+            path = (
+                f"api/v2/devices/{device_id}/chargeHistory"
+                f"?limit={page_size}&offset={offset}"
+            )
             try:
-                result = await self._request("GET", path)
-                if isinstance(result, list):
-                    return result
-                if isinstance(result, dict):
-                    return result.get("data", result.get("history", []))
-            except UnifiConnectAPIError:
-                continue
-        return []
+                raw = await self._request("GET", path, raw_response=True)
+            except UnifiConnectAPIError as err:
+                _LOGGER.warning(
+                    "Charge history request failed at offset %d: %s",
+                    offset, err,
+                )
+                break
+
+            # Extract the session list from the response envelope
+            if isinstance(raw, list):
+                # API returned a flat list (no pagination envelope)
+                all_sessions.extend(raw)
+                break
+            if isinstance(raw, dict):
+                page = raw.get("data", raw.get("history", []))
+                if isinstance(page, list):
+                    all_sessions.extend(page)
+                else:
+                    break
+
+                # Determine if there are more pages
+                total = raw.get("totalCount", raw.get("total"))
+                if total is not None:
+                    if len(all_sessions) >= int(total):
+                        break
+                elif len(page) < page_size:
+                    # No totalCount — stop when a page is smaller than
+                    # requested, meaning we've reached the end.
+                    break
+
+                offset += len(page)
+                if not page:
+                    break
+            else:
+                break
+
+        _LOGGER.debug(
+            "Fetched %d charge history sessions for %s",
+            len(all_sessions), device_id,
+        )
+        return all_sessions
 
     async def request_power_stats(
         self, device_id: str, action_id: str
