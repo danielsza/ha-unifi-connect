@@ -18,8 +18,11 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     UnitOfElectricCurrent,
+    UnitOfElectricPotential,
     UnitOfEnergy,
+    UnitOfPower,
     UnitOfTime,
+    PERCENTAGE,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -251,6 +254,106 @@ EV_SENSOR_DEFINITIONS: list[dict[str, Any]] = [
 ]
 
 
+
+# ── Sensors from top-level device data ──
+
+EV_DEVICE_SENSOR_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "name_suffix": "Firmware Version",
+        "unique_suffix": "firmware_version",
+        "device_key": "firmwareVersion",
+        "device_class": None,
+        "state_class": None,
+        "unit": None,
+        "icon": "mdi:cellphone-arrow-down",
+    },
+    {
+        "name_suffix": "IP Address",
+        "unique_suffix": "ip_address",
+        "device_key": "ip",
+        "device_class": None,
+        "state_class": None,
+        "unit": None,
+        "icon": "mdi:ip-network",
+    },
+]
+
+
+# ── Sensors from device.extraInfo ──
+
+EV_EXTRA_INFO_SENSOR_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "name_suffix": "Connection Quality",
+        "unique_suffix": "connection_quality",
+        "extra_key": "linkQuality",
+        "device_class": None,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": PERCENTAGE,
+        "icon": "mdi:signal",
+    },
+    {
+        "name_suffix": "Connection Type",
+        "unique_suffix": "connection_type",
+        "extra_key": "connectionType",
+        "device_class": None,
+        "state_class": None,
+        "unit": None,
+        "icon": "mdi:ethernet",
+    },
+]
+
+
+# ── Real-time power sensors from WebSocket ──
+
+EV_REALTIME_POWER_SENSOR_DEFINITIONS: list[dict[str, Any]] = [
+    {
+        "name_suffix": "Power",
+        "unique_suffix": "realtime_power",
+        "ws_key": "instantKW",
+        "device_class": SensorDeviceClass.POWER,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfPower.KILO_WATT,
+        "icon": "mdi:flash",
+    },
+    {
+        "name_suffix": "Current",
+        "unique_suffix": "realtime_current",
+        "ws_key": "instantA",
+        "device_class": SensorDeviceClass.CURRENT,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfElectricCurrent.AMPERE,
+        "icon": "mdi:current-ac",
+    },
+    {
+        "name_suffix": "Voltage",
+        "unique_suffix": "realtime_voltage",
+        "ws_key": "instantV",
+        "device_class": SensorDeviceClass.VOLTAGE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfElectricPotential.VOLT,
+        "icon": "mdi:sine-wave",
+    },
+    {
+        "name_suffix": "Session Energy",
+        "unique_suffix": "session_energy",
+        "ws_key": "meter",
+        "device_class": SensorDeviceClass.ENERGY,
+        "state_class": SensorStateClass.TOTAL,
+        "unit": UnitOfEnergy.KILO_WATT_HOUR,
+        "icon": "mdi:battery-charging",
+    },
+    {
+        "name_suffix": "Session Duration",
+        "unique_suffix": "session_duration",
+        "ws_key": "duration",
+        "device_class": SensorDeviceClass.DURATION,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfTime.SECONDS,
+        "icon": "mdi:timer-outline",
+    },
+]
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -263,6 +366,7 @@ async def async_setup_entry(
             continue
 
         shadow = device.get("shadow", {})
+        extra_info = device.get("extraInfo", {})
         _LOGGER.info(
             "Setting up EV sensors for %s (platform: %s)",
             device.get("name"),
@@ -274,12 +378,33 @@ async def async_setup_entry(
             if sensor_def["shadow_key"] in shadow:
                 entities.append(EVShadowSensor(hub, device, sensor_def))
 
+        # Create sensors from top-level device keys
+        for sensor_def in EV_DEVICE_SENSOR_DEFINITIONS:
+            if device.get(sensor_def["device_key"]) is not None:
+                entities.append(EVDeviceKeySensor(hub, device, sensor_def))
+
+        # Create sensors from extraInfo
+        for sensor_def in EV_EXTRA_INFO_SENSOR_DEFINITIONS:
+            if extra_info.get(sensor_def["extra_key"]) is not None:
+                entities.append(EVExtraInfoSensor(hub, device, sensor_def))
+
+        # Uptime sensor (from lastBootTimestamp)
+        if device.get("lastBootTimestamp"):
+            entities.append(EVUptimeSensor(hub, device))
+
+        # Active charging session sensor
+        entities.append(EVActiveSessionSensor(hub, device))
+
+        # Real-time power sensors (from WebSocket)
+        for sensor_def in EV_REALTIME_POWER_SENSOR_DEFINITIONS:
+            entities.append(EVRealtimePowerSensor(hub, device, sensor_def))
+
         # Charge history sensors
         entities.append(EVChargeHistoryEnergySensor(hub, device))
         entities.append(EVChargeHistoryCountSensor(hub, device))
         entities.append(EVLastSessionSensor(hub, device))
 
-        # New stats sensors
+        # Stats sensors
         entities.append(EVTotalChargingTimeSensor(hub, device))
         entities.append(EVAverageSessionTimeSensor(hub, device))
         entities.append(EVAverageEnergyPerSessionSensor(hub, device))
@@ -688,3 +813,230 @@ class EVChargeHistoryLogSensor(UnifiConnectEntity, SensorEntity):
             })
 
         return {"sessions": sessions, "total_sessions": len(sessions)}
+
+
+class EVDeviceKeySensor(UnifiConnectEntity, SensorEntity):
+    """Sensor that reads a value from a top-level device key."""
+
+    def __init__(
+        self,
+        hub: UnifiConnectHub,
+        device: dict,
+        sensor_def: dict[str, Any],
+    ):
+        super().__init__(hub, device, sensor_def["name_suffix"], sensor_def["unique_suffix"])
+        self._device_key = sensor_def["device_key"]
+        self._attr_device_class = sensor_def["device_class"]
+        self._attr_state_class = sensor_def["state_class"]
+        self._attr_native_unit_of_measurement = sensor_def["unit"]
+        self._attr_icon = sensor_def.get("icon")
+
+    @property
+    def native_value(self):
+        device = self._get_device()
+        if not device:
+            return None
+        value = device.get(self._device_key)
+        if isinstance(value, (dict, list)):
+            return str(value)
+        return value
+
+
+class EVExtraInfoSensor(UnifiConnectEntity, SensorEntity):
+    """Sensor that reads a value from device.extraInfo."""
+
+    def __init__(
+        self,
+        hub: UnifiConnectHub,
+        device: dict,
+        sensor_def: dict[str, Any],
+    ):
+        super().__init__(hub, device, sensor_def["name_suffix"], sensor_def["unique_suffix"])
+        self._extra_key = sensor_def["extra_key"]
+        self._attr_device_class = sensor_def["device_class"]
+        self._attr_state_class = sensor_def["state_class"]
+        self._attr_native_unit_of_measurement = sensor_def["unit"]
+        self._attr_icon = sensor_def.get("icon")
+
+    @property
+    def native_value(self):
+        device = self._get_device()
+        if not device:
+            return None
+        extra_info = device.get("extraInfo", {})
+        value = extra_info.get(self._extra_key)
+        if value is not None and self._attr_state_class is not None:
+            try:
+                return round(float(value), 1)
+            except (ValueError, TypeError):
+                return None
+        return value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        device = self._get_device()
+        if not device:
+            return {}
+        extra_info = device.get("extraInfo", {})
+        attrs: dict[str, Any] = {}
+        for key, value in extra_info.items():
+            if isinstance(value, (dict, list)):
+                attrs[key] = str(value)
+            else:
+                attrs[key] = value
+        return attrs
+
+
+class EVUptimeSensor(UnifiConnectEntity, SensorEntity):
+    """Sensor showing device uptime based on lastBootTimestamp."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub, device, "Uptime", "uptime")
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_icon = "mdi:clock-check-outline"
+
+    @property
+    def native_value(self):
+        """Return the last boot time as a datetime.
+
+        HA renders timestamp sensors as relative time ("X hours ago").
+        """
+        device = self._get_device()
+        if not device:
+            return None
+        boot_ts = device.get("lastBootTimestamp")
+        if boot_ts is None:
+            return None
+        try:
+            ts = float(boot_ts)
+            if ts > 1e12:
+                ts = ts / 1000
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+        except (ValueError, TypeError, OSError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        device = self._get_device()
+        if not device:
+            return {}
+        boot_ts = device.get("lastBootTimestamp")
+        attrs: dict[str, Any] = {}
+        if boot_ts is not None:
+            attrs["boot_timestamp"] = boot_ts
+            try:
+                ts = float(boot_ts)
+                if ts > 1e12:
+                    ts = ts / 1000
+                boot_dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+                uptime_seconds = (datetime.now(tz=timezone.utc) - boot_dt).total_seconds()
+                attrs["uptime_days"] = round(uptime_seconds / 86400, 1)
+                attrs["uptime_hours"] = round(uptime_seconds / 3600, 1)
+            except (ValueError, TypeError, OSError):
+                pass
+        return attrs
+
+
+class EVActiveSessionSensor(UnifiConnectEntity, SensorEntity):
+    """Sensor showing the active charging session status."""
+
+    def __init__(self, hub: UnifiConnectHub, device: dict):
+        super().__init__(hub, device, "Active Session", "active_session")
+        self._attr_icon = "mdi:ev-plug-type2"
+
+    @property
+    def native_value(self):
+        """Return charging source type if session active, else 'idle'."""
+        device = self._get_device()
+        if not device:
+            return None
+        session = device.get("chargingSession")
+        if session and isinstance(session, dict) and session.get("id"):
+            return session.get("source", "active")
+        return "idle"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        device = self._get_device()
+        if not device:
+            return {}
+        session = device.get("chargingSession")
+        if not session or not isinstance(session, dict):
+            return {"session_active": False}
+        attrs: dict[str, Any] = {"session_active": bool(session.get("id"))}
+        for key, value in session.items():
+            attrs[f"session_{key}"] = value
+        return attrs
+
+
+class EVRealtimePowerSensor(UnifiConnectEntity, SensorEntity):
+    """Sensor that reads real-time power data from the WebSocket stream.
+
+    Updated every ~3 seconds when the EV Station is actively charging.
+    Returns None when no active charging session (streaming=False).
+    """
+
+    def __init__(
+        self,
+        hub: UnifiConnectHub,
+        device: dict,
+        sensor_def: dict[str, Any],
+    ):
+        super().__init__(hub, device, sensor_def["name_suffix"], sensor_def["unique_suffix"])
+        self._ws_key = sensor_def["ws_key"]
+        self._attr_device_class = sensor_def["device_class"]
+        self._attr_state_class = sensor_def["state_class"]
+        self._attr_native_unit_of_measurement = sensor_def["unit"]
+        self._attr_icon = sensor_def.get("icon")
+        # Real-time data should update frequently
+        self._attr_suggested_display_precision = 2
+
+    @property
+    def available(self) -> bool:
+        """Available when coordinator data exists (WS data may be empty when idle)."""
+        return self.coordinator.data is not None
+
+    @property
+    def native_value(self):
+        """Return the real-time value from WebSocket data."""
+        power_data = self._get_power_data()
+        if not power_data or not power_data.get("streaming"):
+            # Not actively charging — return 0 for power/current/voltage,
+            # None for session-specific metrics
+            if self._ws_key in ("instantKW", "instantA", "instantV"):
+                return 0 if power_data.get("streaming") is False else None
+            return None
+
+        value = power_data.get(self._ws_key)
+        if value is None:
+            return None
+        try:
+            return round(float(value), 2)
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose all WebSocket power data as attributes."""
+        power_data = self._get_power_data()
+        if not power_data:
+            return {"source": "websocket", "streaming": False}
+
+        attrs: dict[str, Any] = {"source": "websocket"}
+        attrs["streaming"] = power_data.get("streaming", False)
+        attrs["ws_connected"] = self._hub.websocket.connected
+
+        # Include session start time as ISO format
+        started_at = power_data.get("startedAt")
+        if started_at:
+            try:
+                ts = float(started_at)
+                if ts > 1e12:
+                    ts = ts / 1000
+                attrs["session_started"] = datetime.fromtimestamp(
+                    ts, tz=timezone.utc
+                ).isoformat()
+            except (ValueError, TypeError, OSError):
+                attrs["session_started_raw"] = started_at
+
+        return attrs

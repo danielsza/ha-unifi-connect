@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Any
+
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -34,3 +38,7 @@ class UnifiConnectEntity(CoordinatorEntity):
         """Get the current shadow state for this device from coordinator data."""
         device = self._get_device()
         return device.get("shadow", {}) if device else {}
+
+    def _get_power_data(self) -> dict[str, Any]:
+        """Get real-time power data from the WebSocket listener."""
+        return self._hub.websocket.power_data.get(self._device_id, {})
