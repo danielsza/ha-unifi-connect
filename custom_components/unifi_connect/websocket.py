@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import struct
+import time
 from typing import Any, Callable
 
 import aiohttp
@@ -112,8 +113,8 @@ class UnifiConnectWebSocket:
     def _get_ws_url(self) -> str:
         """Build the WebSocket URL."""
         if self._controller_type == CONTROLLER_UDMP:
-            return f"https://{self._host}/proxy/connect/"
-        return f"https://{self._host}/proxy/connect/"
+            return f"wss://{self._host}/proxy/connect/"
+        return f"wss://{self._host}/proxy/connect/"
 
     async def start(self) -> None:
         """Start the WebSocket listener loop."""
@@ -166,13 +167,17 @@ class UnifiConnectWebSocket:
         _LOGGER.debug("Connecting to UniFi Connect WebSocket: %s", url)
 
         try:
+            _LOGGER.debug(
+                "Session cookie jar has %d cookies",
+                len(self._session.cookie_jar),
+            )
             self._ws = await self._session.ws_connect(
                 url,
                 ssl=False,
                 heartbeat=30,
             )
         except Exception as err:
-            _LOGGER.debug("WebSocket connection failed: %s", err)
+            _LOGGER.warning("WebSocket connection failed: %s", err)
             raise
 
         _LOGGER.info("UniFi Connect WebSocket connected")
@@ -184,7 +189,7 @@ class UnifiConnectWebSocket:
                 "type": "request",
                 "action": "set_info",
                 "platform": "web",
-                "timestamp": int(asyncio.get_event_loop().time() * 1000),
+                "timestamp": int(time.time() * 1000),
             }
         )
         await self._ws.send_str(handshake)
