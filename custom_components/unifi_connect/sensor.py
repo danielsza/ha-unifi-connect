@@ -1020,7 +1020,11 @@ class EVRealtimePowerSensor(UnifiConnectEntity, SensorEntity):
         """Expose all WebSocket power data as attributes."""
         power_data = self._get_power_data()
         if not power_data:
-            return {"source": "websocket", "streaming": False}
+            return {
+                "source": "websocket",
+                "streaming": False,
+                "ws_connected": self._hub.websocket.connected,
+            }
 
         attrs: dict[str, Any] = {"source": "websocket"}
         attrs["streaming"] = power_data.get("streaming", False)

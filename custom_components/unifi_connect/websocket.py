@@ -91,11 +91,13 @@ class UnifiConnectWebSocket:
         session: aiohttp.ClientSession,
         controller_type: str = CONTROLLER_UDMP,
         on_power_stats: Callable[[dict[str, Any]], None] | None = None,
+        get_cookies: Callable[[], Any] | None = None,
     ):
         self._host = host
         self._session = session
         self._controller_type = controller_type
         self._on_power_stats = on_power_stats
+        self._get_cookies = get_cookies
 
         self._ws: aiohttp.ClientWebSocketResponse | None = None
         self._task: asyncio.Task | None = None
@@ -161,20 +163,44 @@ class UnifiConnectWebSocket:
                 self._reconnect_delay * 2, MAX_RECONNECT_DELAY
             )
 
+    def _build_cookie_header(self) -> dict[str, str] | None:
+        """Build a Cookie header from the API's stored cookies.
+
+        aiohttp's default CookieJar (unsafe=False) silently drops
+        cookies for bare IP addresses per RFC 2109.  The REST API works
+        because it passes cookies explicitly on every request, but
+        ws_connect relies on the jar — so we must inject them manually.
+        """
+        if not self._get_cookies:
+            return None
+        cookies = self._get_cookies()
+        if not cookies:
+            return None
+        try:
+            cookie_str = "; ".join(
+                f"{k}={v.value}" for k, v in cookies.items()
+            )
+            _LOGGER.debug(
+                "Injecting %d cookie(s) into WebSocket headers", len(cookies)
+            )
+            return {"Cookie": cookie_str}
+        except Exception as err:
+            _LOGGER.warning("Failed to build cookie header: %s", err)
+            return None
+
     async def _connect_and_listen(self) -> None:
         """Connect to WebSocket and process messages."""
         url = self._get_ws_url()
         _LOGGER.debug("Connecting to UniFi Connect WebSocket: %s", url)
 
+        headers = self._build_cookie_header() or {}
+
         try:
-            _LOGGER.debug(
-                "Session cookie jar has %d cookies",
-                len(self._session.cookie_jar),
-            )
             self._ws = await self._session.ws_connect(
                 url,
                 ssl=False,
                 heartbeat=30,
+                headers=headers,
             )
         except Exception as err:
             _LOGGER.warning("WebSocket connection failed: %s", err)

@@ -27,10 +27,13 @@ class UnifiConnectHub:
         self.coordinator = UnifiConnectCoordinator(hass=hass, api=self.api)
 
         # WebSocket for real-time EV power data
+        # Pass a cookie getter so the WS can authenticate even when the
+        # session cookie jar drops cookies for bare IP addresses.
         self.websocket = UnifiConnectWebSocket(
             host=entry.data["host"],
             session=session,
             controller_type=entry.data.get("controller_type", CONTROLLER_UDMP),
+            get_cookies=lambda: self.api._cookies,
         )
 
     async def async_initialize(self):
