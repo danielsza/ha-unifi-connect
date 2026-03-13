@@ -812,7 +812,12 @@ class EVChargeHistoryLogSensor(UnifiConnectEntity, SensorEntity):
                 "source": session.get("source", ""),
             })
 
-        return {"sessions": sessions, "total_sessions": len(sessions)}
+        attrs = {"sessions": sessions, "total_sessions": len(sessions)}
+        # Expose raw API pagination metadata for debugging
+        meta = getattr(self._hub.api, "_charge_history_meta", None)
+        if meta:
+            attrs["api_meta"] = meta
+        return attrs
 
 
 class EVDeviceKeySensor(UnifiConnectEntity, SensorEntity):

@@ -150,18 +150,22 @@ class UnifiConnectAPI:
             ) from err
 
     async def get_charge_history(
-        self, device_id: str, page_size: int = 100
+        self, device_id: str, page_size: int = 30
     ) -> list[dict[str, Any]]:
         """Fetch *all* charge history pages for an EV Station device.
 
         The UniFi Connect API paginates chargeHistory responses.  This
         method walks through every page until all sessions are collected.
+
+        The raw pagination metadata from the first response is stored in
+        ``self._charge_history_meta`` for diagnostic purposes.
         """
         all_sessions: list[dict[str, Any]] = []
         offset = 0
         max_pages = 50  # safety limit
+        self._charge_history_meta: dict[str, Any] = {}
 
-        for _ in range(max_pages):
+        for page_num in range(max_pages):
             path = (
                 f"api/v2/devices/{device_id}/chargeHistory"
                 f"?limit={page_size}&offset={offset}"
@@ -175,9 +179,23 @@ class UnifiConnectAPI:
                 )
                 break
 
+            # Log the full envelope shape on the first page
+            if page_num == 0:
+                if isinstance(raw, dict):
+                    self._charge_history_meta = {
+                        k: v for k, v in raw.items()
+                        if k != "data" and not isinstance(v, list)
+                    }
+                    _LOGGER.info(
+                        "chargeHistory response envelope keys: %s, meta: %s",
+                        list(raw.keys()), self._charge_history_meta,
+                    )
+                elif isinstance(raw, list):
+                    self._charge_history_meta = {"format": "flat_list", "count": len(raw)}
+                    _LOGGER.info("chargeHistory returned flat list of %d items", len(raw))
+
             # Extract the session list from the response envelope
             if isinstance(raw, list):
-                # API returned a flat list (no pagination envelope)
                 all_sessions.extend(raw)
                 break
             if isinstance(raw, dict):
@@ -188,23 +206,26 @@ class UnifiConnectAPI:
                     break
 
                 # Determine if there are more pages
-                total = raw.get("totalCount", raw.get("total"))
+                total = raw.get("totalCount", raw.get("total", raw.get("count")))
                 if total is not None:
-                    if len(all_sessions) >= int(total):
+                    total = int(total)
+                    _LOGGER.debug(
+                        "Page %d: got %d items (total so far: %d, server total: %d)",
+                        page_num, len(page), len(all_sessions), total,
+                    )
+                    if len(all_sessions) >= total:
                         break
-                elif len(page) < page_size:
-                    # No totalCount — stop when a page is smaller than
-                    # requested, meaning we've reached the end.
-                    break
+                else:
+                    # No totalCount — stop on empty or short page
+                    if len(page) == 0 or len(page) < page_size:
+                        break
 
                 offset += len(page)
-                if not page:
-                    break
             else:
                 break
 
-        _LOGGER.debug(
-            "Fetched %d charge history sessions for %s",
+        _LOGGER.info(
+            "Fetched %d total charge history sessions for %s",
             len(all_sessions), device_id,
         )
         return all_sessions
