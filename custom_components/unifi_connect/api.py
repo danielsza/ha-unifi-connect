@@ -85,7 +85,11 @@ class UnifiConnectAPI:
             return True
         except UnifiConnectAPIError as err:
             _LOGGER.warning(
-                "Failed to perform %s on %s: %s", action_name, device_id, err
+                "Failed to perform %s on %s: %s (payload: %s)",
+                action_name,
+                device_id,
+                err,
+                payload,
             )
             return False
 
@@ -133,8 +137,14 @@ class UnifiConnectAPI:
                         if raw_response:
                             return data
                         return data.get("data", data) if isinstance(data, dict) else data
+
+                    # Log the response body on error for debugging
+                    try:
+                        error_body = await resp.text()
+                    except Exception:
+                        error_body = "<unreadable>"
                     raise UnifiConnectAPIError(
-                        f"{method} {path} returned status {resp.status}"
+                        f"{method} {path} returned status {resp.status}: {error_body}"
                     )
         except UnifiConnectAPIError:
             raise

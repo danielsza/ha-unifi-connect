@@ -5,6 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .actions import resolve_action_id
 from .const import (
     DOMAIN, DEVICE_PLATFORM_SE21,
     ACTION_DISPLAY_ON, ACTION_DISPLAY_OFF,
@@ -71,14 +72,14 @@ TOGGLE_SWITCHES = [
     },
 ]
 
-# EV Station toggle switches - using actual supportedActions
+# EV Station toggle switches - action IDs resolved dynamically at init
 EV_TOGGLE_SWITCHES = [
     {
         "shadow_key": "statusLightEnabled",
         "name_suffix": "Status Light",
         "unique_suffix": "status_light",
-        "action_on": EV_ACTION_ENABLE_STATUS_LIGHT,
-        "action_off": EV_ACTION_DISABLE_STATUS_LIGHT,
+        "fallback_action_on": EV_ACTION_ENABLE_STATUS_LIGHT,
+        "fallback_action_off": EV_ACTION_DISABLE_STATUS_LIGHT,
         "action_name_on": "enable_status_light",
         "action_name_off": "disable_status_light",
         "icon": "mdi:led-on",
@@ -88,8 +89,8 @@ EV_TOGGLE_SWITCHES = [
         "shadow_key": "enabledCharging",
         "name_suffix": "Charging",
         "unique_suffix": "charging_enabled",
-        "action_on": EV_ACTION_ENABLE_CHARGING,
-        "action_off": EV_ACTION_DISABLE_CHARGING,
+        "fallback_action_on": EV_ACTION_ENABLE_CHARGING,
+        "fallback_action_off": EV_ACTION_DISABLE_CHARGING,
         "action_name_on": "enable_charging",
         "action_name_off": "disable_charging",
         "icon": "mdi:ev-plug-type2",
@@ -99,15 +100,14 @@ EV_TOGGLE_SWITCHES = [
         "shadow_key": "locating",
         "name_suffix": "Locating",
         "unique_suffix": "locating",
-        "action_on": EV_ACTION_START_LOCATING,
-        "action_off": EV_ACTION_STOP_LOCATING,
+        "fallback_action_on": EV_ACTION_START_LOCATING,
+        "fallback_action_off": EV_ACTION_STOP_LOCATING,
         "action_name_on": "start_locating",
         "action_name_off": "stop_locating",
         "icon": "mdi:crosshairs-gps",
         "source": "shadow",
     },
 ]
-
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -167,17 +167,34 @@ class DisplayToggleSwitch(UnifiConnectEntity, SwitchEntity):
 
 
 class EVToggleSwitch(UnifiConnectEntity, SwitchEntity):
-    """On/Off switch for EV Station controls using perform_action."""
+    """On/Off switch for EV Station controls using perform_action.
+
+    Action IDs are resolved dynamically from device data to handle
+    firmware updates that change UUIDs.
+    """
 
     def __init__(self, hub: UnifiConnectHub, device: dict, config: dict):
         super().__init__(hub, device, config["name_suffix"], config["unique_suffix"])
         self._shadow_key = config["shadow_key"]
-        self._action_on = config["action_on"]
-        self._action_off = config["action_off"]
         self._action_name_on = config["action_name_on"]
         self._action_name_off = config["action_name_off"]
         self._attr_icon = config.get("icon")
         self._source = config.get("source", "shadow")
+
+        # Dynamically resolve action IDs
+        self._action_on = resolve_action_id(
+            device, config["action_name_on"], config.get("fallback_action_on")
+        )
+        self._action_off = resolve_action_id(
+            device, config["action_name_off"], config.get("fallback_action_off")
+        )
+
+        _LOGGER.debug(
+            "EV switch '%s': on_id=%s, off_id=%s",
+            config["name_suffix"],
+            self._action_on,
+            self._action_off,
+        )
 
     @property
     def is_on(self):

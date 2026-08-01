@@ -5,6 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .actions import resolve_action_id, get_action_arg_key
 from .const import (
     DOMAIN, DEVICE_PLATFORM_SE21, ACTION_MODE_SWITCH, ACTION_LAUNCH_APP,
     EV_ACTION_SWITCH_MODE, EV_ACTION_SET_FALLBACK_SECURITY, EV_ACTION_SET_BREAKER,
@@ -15,15 +16,16 @@ from .hub import UnifiConnectHub
 
 _LOGGER = logging.getLogger(__name__)
 
-# EV Station select entities - using actual supportedActions and featureFlags enums
+# EV Station select entities - action IDs resolved dynamically at init
 EV_SELECT_ENTITIES = [
     {
         "shadow_key": "evStationMode",
         "feature_key": "evStationMode",
         "name_suffix": "Station Mode",
         "unique_suffix": "station_mode",
-        "action_id": EV_ACTION_SWITCH_MODE,
+        "fallback_action_id": EV_ACTION_SWITCH_MODE,
         "action_name": "switch_ev_station_mode",
+        "fallback_arg_key": "evStationMode",
         "default_options": ["plugAndCharge", "noAccess"],
         "icon": "mdi:ev-station",
     },
@@ -32,13 +34,13 @@ EV_SELECT_ENTITIES = [
         "feature_key": "fallbackSecurity",
         "name_suffix": "Fallback Security",
         "unique_suffix": "fallback_security",
-        "action_id": EV_ACTION_SET_FALLBACK_SECURITY,
+        "fallback_action_id": EV_ACTION_SET_FALLBACK_SECURITY,
         "action_name": "set_fallback_security",
+        "fallback_arg_key": "evStationMode",
         "default_options": ["plugAndCharge", "noAccess"],
         "icon": "mdi:shield-lock",
     },
 ]
-
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -118,14 +120,31 @@ class DisplayAppSelect(UnifiConnectEntity, SelectEntity):
 
 
 class EVSelect(UnifiConnectEntity, SelectEntity):
-    """Select entity for EV Station settings using perform_action."""
+    """Select entity for EV Station settings using perform_action.
+
+    Action IDs are resolved dynamically from device data to handle
+    firmware updates that change UUIDs.
+    """
 
     def __init__(self, hub: UnifiConnectHub, device: dict, config: dict, features: dict):
         super().__init__(hub, device, config["name_suffix"], config["unique_suffix"])
         self._shadow_key = config["shadow_key"]
-        self._action_id = config["action_id"]
         self._action_name = config["action_name"]
         self._attr_icon = config.get("icon")
+
+        # Dynamically resolve action ID and arg key
+        self._action_id = resolve_action_id(
+            device, config["action_name"], config.get("fallback_action_id")
+        )
+        dynamic_arg_key = get_action_arg_key(device, config["action_name"])
+        self._arg_key = dynamic_arg_key or config.get("fallback_arg_key", "value")
+
+        _LOGGER.debug(
+            "EV select '%s': action_id=%s, arg_key='%s'",
+            config["action_name"],
+            self._action_id,
+            self._arg_key,
+        )
 
         # Get options from featureFlags enum if available
         feature_def = features.get(config.get("feature_key", ""), {})
@@ -143,7 +162,7 @@ class EVSelect(UnifiConnectEntity, SelectEntity):
             self._device_id,
             self._action_id,
             self._action_name,
-            {"value": option},
+            {self._arg_key: option},
         )
         await self.coordinator.async_request_refresh()
 
@@ -152,12 +171,26 @@ class EVBreakerSelect(UnifiConnectEntity, SelectEntity):
     """Breaker Amperage selector for EV Station.
 
     Options derived from featureFlags.breakerLoadLimits.
-    The selected breaker determines the maximum output current.
+    Action ID resolved dynamically from device data.
     """
 
     def __init__(self, hub: UnifiConnectHub, device: dict, breaker_limits: list):
         super().__init__(hub, device, "Breaker Amperage", "breaker_amperage")
         self._attr_icon = "mdi:fuse"
+
+        # Dynamically resolve action ID and arg key
+        self._action_id = resolve_action_id(
+            device, "set_breaker_amp", EV_ACTION_SET_BREAKER
+        )
+        dynamic_arg_key = get_action_arg_key(device, "set_breaker_amp")
+        self._arg_key = dynamic_arg_key or "breakerAm"
+
+        _LOGGER.debug(
+            "EV breaker select: action_id=%s, arg_key='%s'",
+            self._action_id,
+            self._arg_key,
+        )
+
         # Build options like ["15A", "20A", "30A", "40A", "50A", "60A", "70A"]
         self._breaker_map: dict[str, int] = {}
         options = []
@@ -183,8 +216,8 @@ class EVBreakerSelect(UnifiConnectEntity, SelectEntity):
         if amp_value is not None:
             await self._hub.api.perform_action(
                 self._device_id,
-                EV_ACTION_SET_BREAKER,
+                self._action_id,
                 "set_breaker_amp",
-                {"value": amp_value},
+                {self._arg_key: amp_value},
             )
             await self.coordinator.async_request_refresh()

@@ -5,6 +5,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .actions import resolve_action_id, get_action_arg_key
 from .const import (
     DOMAIN, DEVICE_PLATFORM_SE21, ACTION_BRIGHTNESS, ACTION_VOLUME,
     EV_ACTION_SET_MAX_OUTPUT, EV_ACTION_BRIGHTNESS,
@@ -39,15 +40,16 @@ NUMBER_ENTITIES = [
     },
 ]
 
-# EV Station number entities - use perform_action with actual action IDs
+# EV Station number entities - action IDs resolved dynamically at init
 EV_NUMBER_ENTITIES = [
     {
         "shadow_key": "maxOutput",
         "feature_key": "maxOutput",
         "name_suffix": "Maximum Output",
         "unique_suffix": "max_output_setting",
-        "action_id": EV_ACTION_SET_MAX_OUTPUT,
+        "fallback_action_id": EV_ACTION_SET_MAX_OUTPUT,
         "action_name": "set_max_output_amp",
+        "fallback_arg_key": "maxOutput",
         "default_min": 6,
         "default_max": 40,
         "step": 1,
@@ -59,8 +61,9 @@ EV_NUMBER_ENTITIES = [
         "feature_key": "brightness",
         "name_suffix": "Brightness",
         "unique_suffix": "ev_brightness_ctrl",
-        "action_id": EV_ACTION_BRIGHTNESS,
+        "fallback_action_id": EV_ACTION_BRIGHTNESS,
         "action_name": "brightness",
+        "fallback_arg_key": "value",
         "default_min": 0,
         "default_max": 255,
         "step": 1,
@@ -68,7 +71,6 @@ EV_NUMBER_ENTITIES = [
         "unit": None,
     },
 ]
-
 
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
@@ -128,16 +130,35 @@ class DisplayNumberSlider(UnifiConnectEntity, NumberEntity):
 
 
 class EVNumberSlider(UnifiConnectEntity, NumberEntity):
-    """Number slider for EV Station controls using perform_action."""
+    """Number slider for EV Station controls using perform_action.
+
+    Action IDs are resolved dynamically from device data to handle
+    firmware updates that change UUIDs.
+    """
 
     def __init__(self, hub: UnifiConnectHub, device: dict, config: dict, features: dict):
         super().__init__(hub, device, config["name_suffix"], config["unique_suffix"])
         self._shadow_key = config["shadow_key"]
-        self._action_id = config["action_id"]
         self._action_name = config["action_name"]
         self._attr_icon = config.get("icon")
         if config.get("unit"):
             self._attr_native_unit_of_measurement = config["unit"]
+
+        # Dynamically resolve action ID from device data
+        self._action_id = resolve_action_id(
+            device, config["action_name"], config.get("fallback_action_id")
+        )
+
+        # Dynamically resolve the arg key name from the action's JSON schema
+        dynamic_arg_key = get_action_arg_key(device, config["action_name"])
+        self._arg_key = dynamic_arg_key or config.get("fallback_arg_key", "value")
+
+        _LOGGER.debug(
+            "EV number '%s': action_id=%s, arg_key='%s'",
+            config["action_name"],
+            self._action_id,
+            self._arg_key,
+        )
 
         # Use featureFlags for min/max if available, otherwise use defaults
         feature_range = features.get(config.get("feature_key", ""), {})
@@ -160,6 +181,6 @@ class EVNumberSlider(UnifiConnectEntity, NumberEntity):
             self._device_id,
             self._action_id,
             self._action_name,
-            {"value": int(value)},
+            {self._arg_key: int(value)},
         )
         await self.coordinator.async_request_refresh()
